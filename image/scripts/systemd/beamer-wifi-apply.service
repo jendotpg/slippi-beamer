@@ -1,0 +1,17 @@
+[Unit]
+Description=Apply the regulatory domain and unblock the radio
+After=gadget.service
+Wants=network-pre.target
+Before=network-pre.target
+Before=NetworkManager.service
+
+OnFailure=beamer-led-error.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=60
+ExecStart=/usr/local/sbin/beamer-wifi-apply.sh
+
+[Install]
+WantedBy=multi-user.target

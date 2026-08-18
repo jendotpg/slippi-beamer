@@ -1,0 +1,9 @@
+[Unit]
+Description=Copy Slippi files from the gadget image to the web root
+After=gadget.service
+BindsTo=gadget.service
+ConditionPathExists=/srv/gadget.img
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/flush-gadget-data.sh

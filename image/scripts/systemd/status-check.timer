@@ -1,0 +1,13 @@
+[Unit]
+Description=Check gadget and game status every 10s
+After=gadget.service
+BindsTo=gadget.service
+
+[Timer]
+Unit=status-check.service
+OnActiveSec=10s
+OnUnitActiveSec=10s
+AccuracySec=1s
+
+[Install]
+WantedBy=gadget.service

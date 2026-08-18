@@ -1,0 +1,17 @@
+[Unit]
+Description=Stage CONFIG/ on the gadget filesystem before it is handed to a UDC
+DefaultDependencies=no
+After=systemd-remount-fs.service beamer-firstboot.service
+Before=gadget.service sysinit.target shutdown.target
+Conflicts=shutdown.target
+
+OnFailure=beamer-led-error.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=60
+ExecStart=/usr/local/sbin/load-conf.sh
+
+[Install]
+WantedBy=sysinit.target

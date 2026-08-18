@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh CONFIG/status.txt when the host ejects the medium
+After=gadget.service
+BindsTo=gadget.service
+ConditionPathExists=/srv/gadget.img
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/gadget-eject-watch.sh
+
+[Install]
+WantedBy=gadget.service

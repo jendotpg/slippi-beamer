@@ -1,0 +1,11 @@
+[Unit]
+Description=Re-check the network every 60s
+
+[Timer]
+Unit=health-check.service
+OnBootSec=60s
+OnUnitActiveSec=60s
+AccuracySec=10s
+
+[Install]
+WantedBy=multi-user.target

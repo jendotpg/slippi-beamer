@@ -1,0 +1,17 @@
+[Unit]
+Description=Derive station identity and stage the gadget image on first boot
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=beamer-preflight.service gadget.service sysinit.target shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=!/var/lib/beamer/provisioned
+
+OnFailure=beamer-led-error.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/station-init.sh
+
+[Install]
+WantedBy=sysinit.target

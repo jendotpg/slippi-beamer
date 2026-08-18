@@ -1,0 +1,15 @@
+[Unit]
+Description=Verify the station joined its configured network
+After=NetworkManager.service gadget.service
+ConditionPathExists=/var/lib/beamer/expected-ssid
+
+OnFailure=beamer-led-error.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=120
+ExecStart=/usr/local/sbin/check-net.sh
+
+[Install]
+WantedBy=multi-user.target

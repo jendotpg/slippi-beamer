@@ -1,0 +1,8 @@
+#!/bin/bash
+set -uo pipefail
+
+LED_CMD=/usr/local/sbin/beamer-led.sh
+
+[[ -x "$LED_CMD" ]] || exit 0
+
+exec "$LED_CMD" off
