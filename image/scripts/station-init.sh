@@ -6,9 +6,6 @@ set -euo pipefail
 
 source /usr/local/lib/beamer/beamer-common.sh
 
-STATE=/var/lib/beamer
-STATION_ID="$STATE/station-id"
-STAMP="$STATE/provisioned"
 TEMPLATE=/srv/gadget-template.img
 IMAGE=/srv/gadget.img
 
@@ -18,10 +15,10 @@ NS=1eba09f7-1bc0-42a3-b69f-697f76c34358
 
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 
-mkdir -p "$STATE"
+beamer_dirs
 
 # --- station identity -----------------------------------------------------
-if [[ ! -s "$STATION_ID" ]]; then
+if [[ ! -s "$BEAMER_STATION_ID" ]]; then
     SERIAL=$(sed -n 's/^Serial[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | tail -n1)
     if [[ -z "$SERIAL" || "$SERIAL" =~ ^0+$ ]]; then
         beamer_error station-init "No usable CPU serial in /proc/cpuinfo (got '${SERIAL:-}')." \
@@ -30,11 +27,11 @@ if [[ ! -s "$STATION_ID" ]]; then
         exit 1
     fi
     python3 -c 'import sys, uuid; print(uuid.uuid5(uuid.UUID(sys.argv[1]), sys.argv[2]))' \
-        "$NS" "$SERIAL" > "$STATION_ID"
+        "$NS" "$SERIAL" > "$BEAMER_STATION_ID"
 fi
 
-STATION=$(cat "$STATION_ID")
-[[ -n "$STATION" ]] || { echo "ERROR: $STATION_ID is empty" >&2; exit 1; }
+STATION=$(cat "$BEAMER_STATION_ID")
+[[ -n "$STATION" ]] || { echo "ERROR: $BEAMER_STATION_ID is empty" >&2; exit 1; }
 
 beamer_apply_hostname
 echo "station: $STATION"
@@ -65,5 +62,5 @@ rm -f "$MARKER"
 
 beamer_mirror_errors
 
-touch "$STAMP"
+touch "$BEAMER_PROVISIONED"
 echo "station-init complete"

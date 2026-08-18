@@ -3,7 +3,7 @@
 # Runs every 10s from status-check.timer, and on demand from POST /status.
 # Nothing here sleeps or probes the network - that is health-check.sh, on its own
 # much slower timer, so this can stay cheap enough to run six times a minute
-# forever.
+# forever. Writes only to memory, never disk.
 set -euo pipefail
 
 BEAMER_ERROR_LATE=1
@@ -13,12 +13,10 @@ source /usr/local/lib/beamer/beamer-common.sh
 # Ticks between forced full listings. At 10s a tick this is once a minute.
 FORCE_EVERY=${FORCE_EVERY:-6}
 
-CACHE=$BEAMER_STATE/drive-cache
-
 F_UDC=       F_BIND=      F_HOST_STATE=
 F_MTOOLS=0   F_SLIPPI=    F_CAPPED=0
 
-mkdir -p "$BEAMER_STATE"
+beamer_dirs
 
 write_fragment() {
     local tmp=$BEAMER_STATUS_FRAG.$$
@@ -49,7 +47,7 @@ if [[ -z "$F_UDC" ]]; then
     exit 1
 fi
 
-read -r F_BIND < /run/beamer-bind-uptime 2>/dev/null || true
+read -r F_BIND < "$BEAMER_BIND_UPTIME" 2>/dev/null || true
 
 for f in /sys/class/udc/*/state; do
     if [[ -e $f ]]; then
@@ -111,7 +109,7 @@ if (( NEED_LIST )); then
     beamer_slippi_count
     F_SLIPPI=$BEAMER_SLIPPI_FILES
     F_CAPPED=$BEAMER_SLIPPI_CAPPED
-    printf '%s %s %s\n' "$F_MTOOLS" "$F_SLIPPI" "$F_CAPPED" > "$CACHE"
+    printf '%s %s %s\n' "$F_MTOOLS" "$F_SLIPPI" "$F_CAPPED" > "$BEAMER_DRIVE_CACHE"
 
     if [[ -n "$BEAMER_SLIPPI_NEWEST" ]]; then
         if beamer_peek_slp "$BEAMER_SLIPPI_NEWEST"; then
@@ -127,8 +125,8 @@ if (( NEED_LIST )); then
     /usr/local/sbin/flush-gadget-data.sh || \
         beamer_log status-check "flush-gadget-data.sh failed"
 else
-    if [[ -r "$CACHE" ]]; then
-        read -r F_MTOOLS F_SLIPPI F_CAPPED < "$CACHE" 2>/dev/null || true
+    if [[ -r "$BEAMER_DRIVE_CACHE" ]]; then
+        read -r F_MTOOLS F_SLIPPI F_CAPPED < "$BEAMER_DRIVE_CACHE" 2>/dev/null || true
     fi
 fi
 

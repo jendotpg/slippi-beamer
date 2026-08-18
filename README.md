@@ -1,13 +1,12 @@
 # Slippi Beamer
 
-## THIS IS A WIP - STILL TO DO:
+## THIS IS A WIP!
 
-1. try using non SanSisk Cruzer Blade naming (in gadget-up.sh) - would be nice if slippi could see wii-side that it's writing to a beamer (although useless for me personally LOL)
-2. set up flint 2! write down exact configuration so its repeatable - perhaps its even worth building an openwrt image.... probably not though?
-3. add a way to change config OTA - most importantly for station name!
-   1. im actually not sure this is a value add - lowkey seems like a CRAZY footgun...
+I currently have ONE working beamer and have confirmed it works succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi) - but I haven't tried a fleet yet (waiting for RasPi's to come in). Don't bother buying hardware until I edit this (or just reach out and ask :P).
 
-I basically currently have ONE working beamer and have confirmed it works succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi) - but I haven't tried a fleet yet (waiting for RasPi's to come in). Don't bother buying hardware until I edit this (or just reach out and ask :P).
+Major TODO still:
+
+1. set up flint 2! write down exact configuration so its repeatable - perhaps its even worth building an openwrt image.... probably not though?
 
 ## Configuring a station
 
@@ -71,15 +70,20 @@ There are three supported exceptions, and all of them work by writing only when 
 | `error.late.log`           | `error.prev.log`          | `CONFIG/error.txt`, prefixed `[previous boot]`            |
 | `status.late`              | `status.prev`             | `CONFIG/status.txt`, suffixed `(as of the previous boot)` |
 
-Both live in `/var/lib/beamer` and survive the power cycle on the SD card. So `CONFIG/status.txt` reports the station's hostname and IP from the session that just ended — which, since the cable carries power, is exactly the session a TO is asking about when she moves it to her laptop.
+Both live in `/var/lib/beamer` - the non-volatile half of the Beamer state. The volatile half lives in `/run/beamer` on tmpfs and is rebuilt each boot.
+
+On the gadget, `CONFIG/status.txt` reports the station's hostname and IP from the session that just ended — which, since the cable carries power, is exactly the session a TO is asking about when she moves it to her laptop. Similarly, `CONFIG/error.txt` reports any errors from the session that just ended.
 
 ## Hardware
 
-| Item                    | Detail                                                                                                                                                                                                                              |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Raspberry Pi Zero W     | Takes`armhf` image                                                                                                                                                                                                                  |
-| microSD card            | 8 GB+. The image is small and read-mostly.                                                                                                                                                                                          |
-| USB-A → micro-USB cable | Into the Pi's**`USB`** port (the inner one, nearer the HDMI connector) — **not** `PWR`. Use a real data cable: many heavy "fast charge" cables have no data lines and are invisible to the host. **Power and data share one cable** |
+| Item                    | Detail                                                                                                                                                                                                                              | Where I Source Them                                                                                                                                                                                                                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Raspberry Pi Zero W     | Takes`armhf` image                                                                                                                                                                                                                  | [www.newark.com/raspberry-pi/sc0020/single-board-computer-arm-cortex/dp/69AK9092](https://www.newark.com/raspberry-pi/sc0020/single-board-computer-arm-cortex/dp/69AK9092)                                                              |
+| microSD card            | 8 GB+ (shoot for 32 - they're barely more expensive and will last much longer). The image is small and there's not much churn.                                                                                                      | [bulkmemorycards.com/shop/microsd-cards/microsd-32gb/sd-32gb-class-10/32gb-microsd-ultra-sandisk-memory-card-2](https://bulkmemorycards.com/shop/microsd-cards/microsd-32gb/sd-32gb-class-10/32gb-microsd-ultra-sandisk-memory-card-2/) |
+| USB-A → micro-USB cable | Into the Pi's**`USB`** port (the inner one, nearer the HDMI connector) — **not** `PWR`. Use a real data cable: many heavy "fast charge" cables have no data lines and are invisible to the host. **Power and data share one cable** | [www.cableleader.com/0-5ft-usb2-0-a-male-to-micro-b-male-cable-black.html](https://www.cableleader.com/0-5ft-usb2-0-a-male-to-micro-b-male-cable-black.html)                                                                            |
+| Case                    | yeah... im still working on this lol....                                                                                                                                                                                            |                                                                                                                                                                                                                                         |
+
+This should come out to about \$30 dollars a unit at time of writing. Depending on venue and size of fleet, you may need to buy a separate router as well - not all WiFi networks can handle an extra 20 devices and very few can handle an extra 80! I use [The GL.Inet Flint 2](https://www.gl-inet.com/en-us/products/gl-mt6000) (~\$170 at time of writing).
 
 ## Repository layout
 
@@ -273,8 +277,8 @@ cloud-init is purged rather than disabled. On a stock image it exists only to ap
 Every tempting little kindness breaks this:
 
 - **Falling back to a default on a bad value.** Now the station's real behaviour is not what its file says, and the TO has no way to see the difference. Reject the file instead.
-- **"Kept the previous setting" on a rejected value.** The previous setting came from a boot that may never have happened on the next card. `load-conf.sh` deletes `station-name`, `num-replays` and `wifi-country` from `/var/lib/beamer` on the reject path for exactly this reason — a rejected card matches a rejected card anywhere else, rather than matching its own past.
-- **Persisting anything derived from the config across boots without re-deriving it.** Anything in `/var/lib/beamer` that a config key owns is a cache of that key, not a second source of truth for it.
+- **"Kept the previous setting" on a rejected value.** The previous setting came from a boot that may never have happened on the next card. `load-conf.sh` deletes `station-name`, `num-replays` and `wifi-country` from `/run/beamer` on the reject path for exactly this reason — a rejected card matches a rejected card anywhere else, rather than matching its own past.
+- **Persisting anything derived from the config across boots without re-deriving it.** Anything a config key owns is a cache of that key, not a second source of truth for it. This is structural: everything `config.txt` owns lives in `/run/beamer` on tmpfs, so it cannot outlive a boot even by accident. Only `/var/lib/beamer` persists, and nothing a config key owns is allowed there — see the two path blocks at the top of `beamer-common.sh`.
 
 There is exactly one deliberate exception, and it is not about values being wrong — it is about there being no values at all. If the image or the config file cannot be _read_ (`no gadget image`, `unreadable`), the station leaves its network settings alone rather than tearing down a working station over a transient mtools failure. `CONFIG/status.txt` says so in as many words.
 

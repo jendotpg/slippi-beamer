@@ -5,24 +5,21 @@ set -uo pipefail
 
 source /usr/local/lib/beamer/beamer-common.sh
 
-COUNTRY_FILE="$BEAMER_STATE/wifi-country"
-CHANGED_FLAG="$BEAMER_STATE/wifi-changed"
-
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 
 beamer_purge_foreign_wifi
 
-COUNTRY=$(head -n1 "$COUNTRY_FILE" 2>/dev/null || true)
+COUNTRY=$(head -n1 "$BEAMER_WIFI_COUNTRY" 2>/dev/null || true)
 
 if [[ -n "$COUNTRY" ]]; then
-    if [[ -e "$CHANGED_FLAG" ]]; then
+    if [[ -e "$BEAMER_WIFI_CHANGED" ]]; then
         if command -v raspi-config >/dev/null 2>&1; then
             raspi-config nonint do_wifi_country "$COUNTRY" >/dev/null 2>&1 \
                 || iw reg set "$COUNTRY" >/dev/null 2>&1
         else
             iw reg set "$COUNTRY" >/dev/null 2>&1
         fi
-        rm -f "$CHANGED_FLAG"
+        rm -f "$BEAMER_WIFI_CHANGED"
         beamer_log wifi-apply "set regulatory domain to $COUNTRY"
     else
         iw reg set "$COUNTRY" >/dev/null 2>&1

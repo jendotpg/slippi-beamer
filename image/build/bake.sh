@@ -150,20 +150,18 @@ cat > /etc/systemd/system/avahi-daemon.service.d/10-beamer-late.conf <<'EOF'
 After=gadget.service
 EOF
 
-# --- persistent journal ---------------------------------------------------
-mkdir -p /var/log/journal
+# --- volatile journal -----------------------------------------------------
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/10-beamer.conf <<'EOF'
-# Capped so systemd-journal-flush does not quietly grow into a boot cost as the
-# journal accumulates on the SD card. See bake.sh.
+# See bake.sh. The journal lives in /run and never reaches the SD card.
 [Journal]
-SystemMaxUse=32M
+Storage=volatile
 RuntimeMaxUse=8M
 EOF
 if ! in_chroot; then
-    systemd-tmpfiles --create --prefix /var/log/journal
     systemctl restart systemd-journald
 fi
+rm -rf /var/log/journal
 
 # --- services a station never uses ----------------------------------------
 for u in bluetooth.service hciuart.service ModemManager.service \
@@ -236,7 +234,7 @@ install -m 0755 "$SCRIPTS/check-net.sh"                          /usr/local/sbin
 install -m 0755 "$SCRIPTS/beamer-led.sh"                         /usr/local/sbin/
 install -d -m 0755                                               /usr/lib/systemd/system-shutdown
 install -m 0755 "$SCRIPTS/beamer-led.shutdown"                   /usr/lib/systemd/system-shutdown/
-install -m 0644 "$SCRIPTS/systemd/gadget.service"            /etc/systemd/system/
+install -m 0644 "$SCRIPTS/systemd/gadget.service"                /etc/systemd/system/
 install -m 0644 "$SCRIPTS/systemd/flush-gadget-data.service"     /etc/systemd/system/
 install -m 0644 "$SCRIPTS/systemd/gadget-eject-watch.service"    /etc/systemd/system/
 install -m 0644 "$SCRIPTS/systemd/wifi-powersave-off.service"    /etc/systemd/system/

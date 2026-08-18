@@ -1,6 +1,11 @@
 #!/bin/bash
 # Build and bind the USB mass storage gadget.
 # Run by gadget.service at boot; safe to run by hand.
+#
+# Does NOT source beamer-common.sh. These files are also 
+# writen in beamer-common.sh:
+#   /var/lib/beamer/station-id
+#   /run/gadget-bind-uptime
 set -euo pipefail
 
 STATION=$(cat /var/lib/beamer/station-id 2>/dev/null || true)
@@ -60,5 +65,5 @@ done
 
 printf '%s\n' "$UDC" > UDC
 read -r uptime _ < /proc/uptime
-printf '%s\n' "$uptime" > /run/beamer-bind-uptime 2>/dev/null || true
+printf '%s\n' "$uptime" > /run/gadget-bind-uptime 2>/dev/null || true
 echo "gadget bound to $UDC at ${uptime}s"

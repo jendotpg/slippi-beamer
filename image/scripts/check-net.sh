@@ -9,20 +9,17 @@ IFACE=${IFACE:-$BEAMER_IFACE}
 BEAMER_IFACE=$IFACE 
 ASSOC_TIMEOUT=${ASSOC_TIMEOUT:-45}
 DHCP_TIMEOUT=${DHCP_TIMEOUT:-30}
-EXPECT_FILE="$BEAMER_STATE/expected-ssid"
-NET_STATUS="$BEAMER_STATE/net-status"
-NET_RESULT="$BEAMER_STATE/net-result"
 
 record() {
-    printf '%s\n' "$2" > "$NET_STATUS"
-    printf '%s\n' "$1" > "$NET_RESULT"
+    printf '%s\n' "$2" > "$BEAMER_NET_STATUS"
+    printf '%s\n' "$1" > "$BEAMER_NET_RESULT"
     beamer_snapshot_status "$2"
 }
 
-rm -f "$NET_RESULT"
+rm -f "$BEAMER_NET_RESULT"
 
-[[ -s $EXPECT_FILE ]] || exit 0
-EXPECT=$(head -n1 "$EXPECT_FILE")
+[[ -s $BEAMER_EXPECT_SSID ]] || exit 0
+EXPECT=$(head -n1 "$BEAMER_EXPECT_SSID")
 [[ -n $EXPECT ]] || exit 0
 
 # --- 1. associated, with the right AP? ------------------------------------

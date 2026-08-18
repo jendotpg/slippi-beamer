@@ -63,6 +63,7 @@ if [[ -n $LISTING ]]; then
         | grep -Ei '/[^/.][^/]*\.slp$' | sort | tail -n "$KEEP")
 fi
 
+beamer_dirs
 mkdir -p "$DEST"
 
 CHANGED=0

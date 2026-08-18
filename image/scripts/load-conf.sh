@@ -12,17 +12,12 @@ source /usr/local/lib/beamer/beamer-common.sh
 TEMPLATE=/srv/gadget-template.img
 NM_DIR=/etc/NetworkManager/system-connections
 PROFILE="$NM_DIR/beamer-wifi.nmconnection"
-HASH_FILE="$BEAMER_STATE/wifi.hash"
-EXPECT_SSID="$BEAMER_STATE/expected-ssid"
-NET_RESULT="$BEAMER_STATE/net-result"
-COUNTRY_FILE="$BEAMER_STATE/wifi-country"
-CHANGED_FLAG="$BEAMER_STATE/wifi-changed"
 
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$BEAMER_STATE"
+beamer_dirs
 
 BEAMER_STEP_US=${EPOCHREALTIME/./}
 BEAMER_START_US=$BEAMER_STEP_US
@@ -59,7 +54,7 @@ ssid_bytes() {
 }
 
 finish() {
-    mkdir -p "$BEAMER_STATE"
+    beamer_dirs
     printf '%s\n' "$1" > "$BEAMER_WIFI_OUTCOME"
 
     beamer_apply_hostname
@@ -78,7 +73,7 @@ beamer_read_status "$BEAMER_STATUS_PREV"
 
 beamer_rotate_errors
 
-rm -f "$NET_RESULT"
+rm -f "$BEAMER_NET_RESULT"
 step "rotated state"
 
 # --- locate the config ----------------------------------------------------
@@ -183,7 +178,7 @@ esac
 
 if (( ! ok )); then
     beamer_clear_wifi
-    rm -f "$BEAMER_STATION_NAME_FILE" "$BEAMER_KEEP_FILE" "$COUNTRY_FILE"
+    rm -f "$BEAMER_STATION_NAME_FILE" "$BEAMER_KEEP_FILE" "$BEAMER_WIFI_COUNTRY"
     finish "rejected, see error.txt - no network"
 fi
 
@@ -202,16 +197,16 @@ fi
 step "parsed and validated"
 
 HASH=$(printf '%s\0' "$SSID" "$PASSWORD" "$COUNTRY" "$HIDDEN" | sha256sum | cut -d' ' -f1)
-printf '%s\n' "$COUNTRY" > "$COUNTRY_FILE"
+printf '%s\n' "$COUNTRY" > "$BEAMER_WIFI_COUNTRY"
 step "hashed"
-if [[ -f $PROFILE && -f $HASH_FILE && "$(cat "$HASH_FILE")" == "$HASH" ]]; then
-    printf '%s\n' "$SSID" > "$EXPECT_SSID"
+if [[ -f $PROFILE && -f $BEAMER_WIFI_HASH && "$(cat "$BEAMER_WIFI_HASH")" == "$HASH" ]]; then
+    printf '%s\n' "$SSID" > "$BEAMER_EXPECT_SSID"
     finish "unchanged SSID=\"$SSID\""
 fi
 
 rm -f "$BEAMER_ERR_PREV"
 
-: > "$CHANGED_FLAG"
+: > "$BEAMER_WIFI_CHANGED"
 
 # --- profile --------------------------------------------------------------
 TMP="$WORK/beamer-wifi.nmconnection"
@@ -244,8 +239,8 @@ if ! install -m 0600 -o root -g root "$TMP" "$PROFILE.new" || ! mv -f "$PROFILE.
     finish "failed to write profile - no network"
 fi
 
-printf '%s\n' "$SSID" > "$EXPECT_SSID"
-printf '%s\n' "$HASH" > "$HASH_FILE"
+printf '%s\n' "$SSID" > "$BEAMER_EXPECT_SSID"
+printf '%s\n' "$HASH" > "$BEAMER_WIFI_HASH"
 
 beamer_log load-conf "staged SSID=\"$SSID\" country=$COUNTRY hidden=$HIDDEN"
 finish "applied SSID=\"$SSID\" country=$COUNTRY"

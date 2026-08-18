@@ -10,7 +10,9 @@ set -uo pipefail
 
 BOOT_MS=500
 ERROR_MS=100
-STATE=/run/beamer-led-state
+
+# Not under /run/beamer: this script does not source beamer-common.sh.
+STATE=/run/led-state
 
 usage() { echo "usage: ${0##*/} boot|ok|error|off" >&2; exit 2; }
 

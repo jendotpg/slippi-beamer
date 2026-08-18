@@ -1,22 +1,20 @@
 #!/bin/bash
 # Deliberately deprioritised in health-check.service (SCHED_IDLE, idle I/O).
 # Nothing here is urgent, and it must never take cycles from status-check or
-# from the gadget path.
+# from the gadget path. Writes only to memory, never disk.
 set -euo pipefail
 
 BEAMER_ERROR_LATE=1
 
 source /usr/local/lib/beamer/beamer-common.sh
 
-STATION_ID=$BEAMER_STATE/station-id
-EXPECT_SSID=$BEAMER_STATE/expected-ssid
 PROBE_BUDGET=${PROBE_BUDGET:-15}
 
 F_STATION=  F_STATION_NAME=  F_HOST=     F_BOOT=    F_UPTIME=
 F_WIFI=     F_NETWORK=  F_IP=
 F_HTTP=0    F_SSH=0     F_MDNS=0
 
-mkdir -p "$BEAMER_STATE"
+beamer_dirs
 
 fmt_uptime() {
     local s=${1:-0} d h m
@@ -87,8 +85,8 @@ publish() {
 }
 
 # --- identity and network -------------------------------------------------
-if [[ -s "$STATION_ID" ]]; then
-    read -r F_STATION < "$STATION_ID"
+if [[ -s "$BEAMER_STATION_ID" ]]; then
+    read -r F_STATION < "$BEAMER_STATION_ID"
 fi
 F_STATION_NAME=$(beamer_station_name)
 F_HOST=$(beamer_hostname)
@@ -96,8 +94,8 @@ read -r F_UPTIME _ < /proc/uptime
 F_UPTIME=${F_UPTIME%.*}
 F_BOOT=$(beamer_iso_time "$(( EPOCHSECONDS - F_UPTIME ))")
 
-if [[ -s "$EXPECT_SSID" ]]; then
-    read -r F_WIFI < "$EXPECT_SSID" || true
+if [[ -s "$BEAMER_EXPECT_SSID" ]]; then
+    read -r F_WIFI < "$BEAMER_EXPECT_SSID" || true
     read -r F_NETWORK < "$BEAMER_NET_STATUS" 2>/dev/null || true
     beamer_read_status "$BEAMER_STATUS_LATE"
     F_IP=${BEAMER_LAST_IP:-}

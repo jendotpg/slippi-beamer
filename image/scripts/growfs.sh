@@ -13,14 +13,11 @@ set -uo pipefail
 
 source /usr/local/lib/beamer/beamer-common.sh
 
-STAMP="$BEAMER_STATE/grown"
 MIN_GROW_MB=${MIN_GROW_MB:-64}
 
 # Deliberately NOT "fill the card". A station holds a 1 GB gadget image, at most
-# 16 replay files and a capped journal; everything past this is dead space that
-# systemd-fsck-root has to walk on every boot. Filling a 239 GB card measured
-# 4.2 seconds of fsck in front of the gadget binding, which is more than the
-# entire rest of userspace we spent this long optimising.
+# 16 replay files and some capped state; everything past this is dead space that
+# systemd-fsck-root has to walk on every boot.
 MAX_ROOT_MB=${MAX_ROOT_MB:-8192}
 
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
@@ -53,7 +50,7 @@ TARGET_MB=$(( CUR_MB + FREE_MB ))
 
 if (( TARGET_MB - CUR_MB < MIN_GROW_MB )); then
     beamer_log growfs "root is ${CUR_MB}MB, cap is ${MAX_ROOT_MB}MB, ${FREE_MB}MB unallocated - nothing worth growing"
-    touch "$STAMP"
+    touch "$BEAMER_GROWN"
     exit 0
 fi
 
@@ -74,6 +71,6 @@ if ! resize2fs "$ROOT_DEV" >/dev/null 2>&1; then
     exit 1
 fi
 
-touch "$STAMP"
+touch "$BEAMER_GROWN"
 beamer_log growfs "root filesystem is now $(findmnt -no SIZE / 2>/dev/null || echo '?')"
 exit 0

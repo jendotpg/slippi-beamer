@@ -9,42 +9,62 @@
 # -u to a date(1) we would rather not fork at all.
 export TZ=UTC
 
-BEAMER_STATE=/var/lib/beamer
-BEAMER_ERR_LOG="$BEAMER_STATE/error.log"
+BEAMER_STATE=/var/lib/beamer # durable
+BEAMER_RUN=/run/beamer       # ephemeral
+
+# --- durable: has to survive a power cut ----------------------------------
+BEAMER_STATION_ID="$BEAMER_STATE/station-id"
+BEAMER_PROVISIONED="$BEAMER_STATE/provisioned"
+BEAMER_GROWN="$BEAMER_STATE/grown"
+BEAMER_WIFI_HASH="$BEAMER_STATE/wifi.hash"
 BEAMER_ERR_LATE="$BEAMER_STATE/error.late.log"
 BEAMER_ERR_PREV="$BEAMER_STATE/error.prev.log"
 BEAMER_STATUS_LATE="$BEAMER_STATE/status.late"
 BEAMER_STATUS_PREV="$BEAMER_STATE/status.prev"
-BEAMER_WIFI_OUTCOME="$BEAMER_STATE/wifi-outcome"
+
+# --- ephemeral: rebuilt every boot ----------------------------------------
+BEAMER_ERR_LOG="$BEAMER_RUN/error.log"
+BEAMER_REPORT_JSON="$BEAMER_RUN/report.json"
+BEAMER_LIVE_GAME="$BEAMER_RUN/live_game"
+BEAMER_GAME_JSON="$BEAMER_RUN/game.json"
+BEAMER_WITHHELD="$BEAMER_RUN/withheld"
+BEAMER_STATUS_FRAG="$BEAMER_RUN/status.frag"
+BEAMER_HEALTH_FRAG="$BEAMER_RUN/health.frag"
+BEAMER_NET_STATUS="$BEAMER_RUN/net-status"
+BEAMER_NET_RESULT="$BEAMER_RUN/net-result"
+BEAMER_IMG_STAMP="$BEAMER_RUN/img-stamp"
+BEAMER_DRIVE_CACHE="$BEAMER_RUN/drive-cache"
+BEAMER_STATION_NAME_FILE="$BEAMER_RUN/station-name"
+BEAMER_KEEP_FILE="$BEAMER_RUN/num-replays"
+BEAMER_EXPECT_SSID="$BEAMER_RUN/expected-ssid"
+BEAMER_WIFI_OUTCOME="$BEAMER_RUN/wifi-outcome"
+BEAMER_WIFI_COUNTRY="$BEAMER_RUN/wifi-country"
+BEAMER_WIFI_CHANGED="$BEAMER_RUN/wifi-changed"
+BEAMER_RESET_FLAG="$BEAMER_RUN/reset-in-progress"
+
+BEAMER_BIND_UPTIME=/run/gadget-bind-uptime # also written by gadget-up.sh
 BEAMER_IFACE=${BEAMER_IFACE:-wlan0}
 BEAMER_GADGET_IMG=/srv/gadget.img
 BEAMER_GADGET_OFFSET=1048576
 BEAMER_GADGET_FAT="${BEAMER_GADGET_IMG}@@${BEAMER_GADGET_OFFSET}"
 BEAMER_LED_CMD=/usr/local/sbin/beamer-led.sh
-BEAMER_REPORT_JSON="$BEAMER_STATE/report.json"
 BEAMER_WEB_SLIPPI=/var/www/html/SLIPPI
 BEAMER_WEB_INDEX="$BEAMER_WEB_SLIPPI/index.json"
 BEAMER_SLP_PEEK=/usr/local/lib/beamer/slp-peek
-BEAMER_LIVE_GAME="$BEAMER_STATE/live_game"
-BEAMER_GAME_JSON="$BEAMER_STATE/game.json"
-BEAMER_WITHHELD="$BEAMER_STATE/withheld"
-BEAMER_STATUS_FRAG="$BEAMER_STATE/status.frag"
-BEAMER_HEALTH_FRAG="$BEAMER_STATE/health.frag"
-BEAMER_NET_STATUS="$BEAMER_STATE/net-status"
-BEAMER_NET_RESULT="$BEAMER_STATE/net-result"
-BEAMER_IMG_STAMP="$BEAMER_STATE/img-stamp"
-BEAMER_RESET_FLAG=/run/beamer-reset-in-progress
-BEAMER_STATION_NAME_FILE="$BEAMER_STATE/station-name"
-BEAMER_KEEP_FILE="$BEAMER_STATE/num-replays"
 BEAMER_KEEP_DEFAULT=10
 BEAMER_KEEP_MAX=16
 # determined experimentally - past 2000, stat starts to actually cost something
 BEAMER_COUNT_CAP=${BEAMER_COUNT_CAP:-2000}
 
+beamer_dirs() {
+    [[ -d $BEAMER_STATE && -d $BEAMER_RUN ]] && return 0
+    mkdir -p "$BEAMER_STATE" "$BEAMER_RUN"
+}
+
 beamer_station_id() {
     local id=
-    if [[ -r "$BEAMER_STATE/station-id" ]]; then
-        read -r id < "$BEAMER_STATE/station-id" || true
+    if [[ -r "$BEAMER_STATION_ID" ]]; then
+        read -r id < "$BEAMER_STATION_ID" || true
     fi
     printf '%s' "${id:-unknown}"
 }
@@ -95,7 +115,7 @@ beamer_error() {
     if (( ${BEAMER_ERROR_LATE:-0} )); then
         target=$BEAMER_ERR_LATE
     fi
-    mkdir -p "$BEAMER_STATE"
+    beamer_dirs
 
     local head_line
     printf -v head_line '[%s] %s' "$component" "$1"
@@ -119,7 +139,7 @@ beamer_error() {
 }
 
 beamer_rotate_errors() {
-    mkdir -p "$BEAMER_STATE"
+    beamer_dirs
     if [[ -s "$BEAMER_ERR_LATE" ]]; then
         mv -f "$BEAMER_ERR_LATE" "$BEAMER_ERR_PREV"
     else
@@ -142,8 +162,8 @@ beamer_mirror_errors() {
         return 0
     fi
 
-    # /run is tmpfs: no SD write, and no mktemp fork.
-    local tmp=/run/beamer-error.$$
+    beamer_dirs
+    local tmp=$BEAMER_RUN/error.$$
     {
         printf 'Beamer errors, boot of %s\n' "$(beamer_boot_time)"
         printf 'station %s\n' "$(beamer_station_id)"
@@ -388,10 +408,10 @@ beamer_json_errors() {
 
 beamer_snapshot_status() {
     local net=${1:-} addr
-    [[ -n "$net" ]] || net=$(cat "$BEAMER_STATE/net-status" 2>/dev/null || true)
+    [[ -n "$net" ]] || net=$(cat "$BEAMER_NET_STATUS" 2>/dev/null || true)
     addr=$(ip -4 -o addr show dev "$BEAMER_IFACE" scope global 2>/dev/null \
            | awk '{print $4; exit}' || true)
-    mkdir -p "$BEAMER_STATE"
+    beamer_dirs
     {
         printf 'net=%s\n' "$net"
         printf 'ip=%s\n' "${addr%%/*}"
@@ -399,7 +419,7 @@ beamer_snapshot_status() {
 }
 
 beamer_rotate_status() {
-    mkdir -p "$BEAMER_STATE"
+    beamer_dirs
     if [[ -s "$BEAMER_STATUS_LATE" ]]; then
         mv -f "$BEAMER_STATUS_LATE" "$BEAMER_STATUS_PREV"
     else
@@ -426,12 +446,13 @@ beamer_write_status() {
     [[ -e "$BEAMER_GADGET_IMG" ]] || return 0
 
     local station=unknown host=unknown name= up
-    [[ -r "$BEAMER_STATE/station-id" ]] && read -r station < "$BEAMER_STATE/station-id"
+    [[ -r "$BEAMER_STATION_ID" ]] && read -r station < "$BEAMER_STATION_ID"
     [[ -r "$BEAMER_STATION_NAME_FILE" ]] && read -r name < "$BEAMER_STATION_NAME_FILE"
     [[ -r /etc/hostname ]] && read -r host < /etc/hostname
     read -r up _ < /proc/uptime 2>/dev/null || up=0
 
-    tmp=/run/beamer-status.$$
+    beamer_dirs
+    tmp=$BEAMER_RUN/status.$$
     printf 'Beamer station status\r\nname    %s\r\nstation %s\r\nhost    %s\r\nboot    %(%Y-%m-%d %H:%M:%S UTC)T\r\n\r\nwifi:    %s\r\nnetwork: %s%s\r\nip:      %s%s\r\n' \
         "${name:-$station}" "$station" "$host" "$(( EPOCHSECONDS - ${up%.*} ))" \
         "${outcome:-unknown}" \
@@ -477,6 +498,6 @@ beamer_clear_wifi() {
         beamer_log clear-wifi "removed the beamer-wifi profile"
     fi
 
-    rm -f "$BEAMER_STATE/expected-ssid"
-    rm -f "$BEAMER_STATE/wifi.hash"
+    rm -f "$BEAMER_EXPECT_SSID"
+    rm -f "$BEAMER_WIFI_HASH"
 }

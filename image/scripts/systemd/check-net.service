@@ -1,7 +1,7 @@
 [Unit]
 Description=Verify the station joined its configured network
 After=NetworkManager.service gadget.service
-ConditionPathExists=/var/lib/beamer/expected-ssid
+ConditionPathExists=/run/beamer/expected-ssid
 
 OnFailure=beamer-led-error.service
 

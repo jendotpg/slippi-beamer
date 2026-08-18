@@ -28,6 +28,7 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
+beamer_dirs
 : > "$BEAMER_RESET_FLAG"
 if systemctl stop status-check.timer status-check.service flush-gadget-data.service >/dev/null 2>&1; then
     RESTORE_TIMER=1
