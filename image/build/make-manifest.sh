@@ -2,12 +2,20 @@
 # Generate the Raspberry Pi Imager OS manifest that lists the beamer artifacts.
 #
 #   ./make-manifest.sh              -> ../dist/beamer.rpi-imager-manifest
+#
+# ASSET_BASE_URL=https://...      where the artifacts will be served from. Unset,
+#                                 entries point at the local file, which is what
+#                                 you want for flashing a card off your own disk.
+#                                 Set, they point at <base>/<filename> - that is
+#                                 how the release manifest gets URLs a stranger
+#                                 can resolve. See ../../.github/workflows/publish.yml.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/.." && pwd)
 DIST=${DIST:-$REPO/dist}
 OUT="$DIST/beamer.rpi-imager-manifest"
+ASSET_BASE_URL=${ASSET_BASE_URL:-}
 
 command -v python3 >/dev/null || { echo "ERROR: python3 not found" >&2; exit 1; }
 command -v xz      >/dev/null || { echo "ERROR: xz not found" >&2; exit 1; }
@@ -50,13 +58,19 @@ for target in armhf; do
     [[ -n "$EXTRACT_SIZE" && -n "$EXTRACT_SHA256" ]] || {
         echo "ERROR: no uncompressed size/hash for $NAME" >&2; exit 1; }
 
+    if [[ -n "$ASSET_BASE_URL" ]]; then
+        URL="${ASSET_BASE_URL%/}/$NAME"
+    else
+        URL="file://$IMG"
+    fi
+
     say "$NAME -> $DATE, $boards"
     ENTRIES[${#ENTRIES[@]}]="$(cat <<EOF
     {
       "name": "Beamer station $DATE ($target)",
       "description": "Wii Slippi beamer station. $boards.",
       "icon": "https://downloads.raspberrypi.com/raspios_armhf/Raspberry_Pi_OS_(32-bit).png",
-      "url": "file://$IMG",
+      "url": "$URL",
       "release_date": "$DATE",
       "image_download_size": $DOWNLOAD_SIZE,
       "extract_size": $EXTRACT_SIZE,

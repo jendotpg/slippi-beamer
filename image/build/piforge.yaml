@@ -28,6 +28,9 @@ provision:
       #!/bin/bash
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
+      # Keep in step with the dependency block of ../linux-build.sh: that list
+      # and this one describe the same build host, one for a real Linux box and
+      # one for lima, and a build that needs a new tool needs it in both.
       apt-get update
       apt-get install -y --no-install-recommends \
           e2fsprogs dosfstools fdisk mtools xz-utils curl ca-certificates \

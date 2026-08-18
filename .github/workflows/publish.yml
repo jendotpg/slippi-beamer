@@ -1,0 +1,58 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 350
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Cache the pinned base image
+        uses: actions/cache@v4
+        with:
+          path: image/.cache
+          key: base-image-${{ hashFiles('image/build/targets/*.conf') }}
+
+      - name: Build the image
+        env:
+          BEAMER_USER_PASS: password
+          ASSET_BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: ./image/linux-build.sh armhf
+
+      - name: Create draft release and upload artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Draft $GITHUB_REF_NAME already exists, reusing it."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --title "$GITHUB_REF_NAME" \
+              --notes ""
+          fi
+          gh release upload "$GITHUB_REF_NAME" \
+            image/dist/beamer-*-armhf.img.xz \
+            image/dist/beamer-*-armhf.img.xz.meta \
+            image/dist/beamer.rpi-imager-manifest \
+            --clobber
+
+      - name: Upload artifacts to the run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: image/dist/*
+          retention-days: 14
+          if-no-files-found: warn

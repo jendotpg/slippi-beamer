@@ -1,35 +1,13 @@
 # Slippi Beamer
 
-## TO DO
+## THIS IS A WIP - STILL TO DO:
 
-1. setup ci to auto-build images in github actions!
-2. try using non SanSisk Cruzer Blade naming (in gadget-up.sh) - would be nice if slippi could see wii-side that it's writing to a beamer (although useless for me personally LOL)
-3. figure out how to handle major / regional wifi (probably a secondary router to hold just the beamer fleet. may also need to update slippi-replay-manager)
-4. add a way to change config OTA - most importantly for station name!
+1. try using non SanSisk Cruzer Blade naming (in gadget-up.sh) - would be nice if slippi could see wii-side that it's writing to a beamer (although useless for me personally LOL)
+2. set up flint 2! write down exact configuration so its repeatable - perhaps its even worth building an openwrt image.... probably not though?
+3. add a way to change config OTA - most importantly for station name!
+   1. im actually not sure this is a value add - lowkey seems like a CRAZY footgun...
 
-## Status LED
-
-A Beamer's LED is a live readout of station health. It is the fastest way — and usually the only way — to tell whether a Beamer is actually working.
-
-| Pattern                                    | Meaning                                                                                                  |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| Slow even blink, about once a second       | Booting. Wait a bit - up to 90 seconds if the WiFi is failing. A normal boot should be under 30 seconds. |
-| Solid on                                   | Healthy! More precisely, lighttpd is answering on port 80 and sshd is accepting connections.             |
-| Fast even blink, about five times a second | Not connected. Something went wrong (or this is a freshly imaged Beamer on its first boot)               |
-| Off                                        | The drive was ejected and the station has powered itself off. Safe to unplug.                            |
-
-## Setting up a new Beamer
-
-Download the latest image archive <TODO: theres no download spot yet!>.and unzip it. Open the Raspberry Pi Imager, click App Options -> Content Repository -> EDIT -> Use custom file -> `image/dist/beamer.rpi-imager-manifest` -> APPLY & RESTART.
-
-Then per station:
-
-1. Flash the `Beamer station <date> (armhf)` entry.
-2. Eject and boot. First boot ends with the station on **no network**, by design and identically on every card.
-3. Move the cable to a laptop. The `BEAMER` drive appears with a `CONFIG/init-finished.txt` confirming provisioning completed.
-4. Fill in `CONFIG/config.txt`, eject, and move the Beamer back to the Wii. See [Configuring a station](#configuring-a-station) for what goes in it.
-5. **Watch the LED.** It goes solid once the station has joined the network and is serving and reachable.
-   1. If the LED instead starts blinking really fast, you had some sort of error! Unplug the bBeamer from the wii and bring it back to your laptop. You can see the error from the last section under `CONFIG/error.txt`. Note that this is from the LAST session! If you update and replug directly into the laptop without trying on a Wii in between, just watch the light - there will still be an `error.txt`.
+I basically currently have ONE working beamer and have confirmed it works succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi) - but I haven't tried a fleet yet (waiting for RasPi's to come in). Don't bother buying hardware until I edit this (or just reach out and ask :P).
 
 ## Configuring a station
 
@@ -48,44 +26,31 @@ If there are any issues, they'll be recorded in `CONFIG/error.txt`.
 
 **The file is taken whole or not at all.** One bad value rejects the entire config: the station clears its network, drops every setting this file owns, blinks the error pattern, and writes what was wrong to `CONFIG/error.txt`. It does not keep the good half. It does not substitute a default for the bad half. The `NUM-REPLAYS-SERVED` ceiling of 16 is a real limit.
 
-## Hardware
+## Status LED
 
-| Item                    | Detail                                                                                                                                                                                                                              |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Raspberry Pi Zero W     | Takes`armhf` image                                                                                                                                                                                                                  |
-| microSD card            | 8 GB+. The image is small and read-mostly.                                                                                                                                                                                          |
-| USB-A → micro-USB cable | Into the Pi's**`USB`** port (the inner one, nearer the HDMI connector) — **not** `PWR`. Use a real data cable: many heavy "fast charge" cables have no data lines and are invisible to the host. **Power and data share one cable** |
+A Beamer's LED is a live readout of station health. It is the fastest way — and usually the only way — to tell whether a Beamer is actually working.
 
-## Repository layout
+| Pattern                                    | Meaning                                                                                                  |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Slow even blink, about once a second       | Booting. Wait a bit - up to 90 seconds if the WiFi is failing. A normal boot should be under 30 seconds. |
+| Solid on                                   | Healthy! More precisely, lighttpd is answering on port 80 and sshd is accepting connections.             |
+| Fast even blink, about five times a second | Not connected. Something went wrong (or this is a freshly imaged Beamer on its first boot)               |
+| Off                                        | The drive was ejected and the station has powered itself off. Safe to unplug.                            |
 
-```
-slippi-beamer/
-├── README.md									this document
-├── image
-│   ├── build
-│   │   └── ...									dev-box-side build scripts + VM spec
-│   ├── dist
-│   │   └── ...									images and manifest file for rpi imager
-│   ├── scripts
-│   │   └── ...									beamer-side scripts and services
-│   └── mac-build.sh							mac build script
-└── tools
-    └── fake-beamer.py							pretend to be a station, for app-side dev
-```
+## Setting up a new Beamer
 
-### Testing without a station
+Download `beamer.rpi-imager-manifest` from the [latest release](https://github.com/jendotpg/slippi-beamer/releases/latest). Open the Raspberry Pi Imager, click App Options -> Content Repository -> EDIT -> Use custom file -> point it at that file -> APPLY & RESTART. Imager pulls the image itself from the release, so there is nothing to unzip. (If you built the image yourself, `image/dist/beamer.rpi-imager-manifest` is the same file pointing at your local copy instead.)
 
-Everything `replay-manager-for-slippi` talks to is an mDNS advertisement and four HTTP endpoints — no gadget, no LED, no Wii, so the app's fleet view can be developed and tested on a laptop. Build `slp-peek` natively first; it is portable C and compiles anywhere:
+Then per station:
 
-```bash
-cc -Os -Wall -o /tmp/slp-peek image/scripts/slp-peek.c
-```
-
-```bash
-tools/fake-beamer.py --name beamer-stream-1 --port 8081 --replays ~/slp/stream1 --game ~/slp/live.slp
-```
-
-Run several on different ports to simulate a fleet — a client should honour the port a station advertises. `--unhealthy` and `--unreported` produce the two known failure states of `/status`.
+1. Flash the `Beamer station <date> (armhf)` entry.
+2. Plug the Beamer into a laptop. The `BEAMER` drive appears with a `CONFIG/init-finished.txt` confirming provisioning completed.
+3. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
+   1. See [Configuring a station](#configuring-a-station) for more details on this file.
+4. Eject the beamer and wait until the light turns off.
+5. Plug the beamer into a wii.
+6. **Watch the LED.** If it goes solid your beamer is working and ready to go!
+   1. If the LED instead starts blinking really fast, you had some sort of error! Unplug the Beamer from the wii and bring it back to your laptop. You can see the error from the last section under `CONFIG/error.txt`. Note that this is from the LAST session! If you update and replug directly into the laptop without trying on a Wii in between, just watch the light - there will still be an `error.txt`.
 
 ## How it works
 
@@ -107,6 +72,48 @@ There are three supported exceptions, and all of them work by writing only when 
 | `status.late`              | `status.prev`             | `CONFIG/status.txt`, suffixed `(as of the previous boot)` |
 
 Both live in `/var/lib/beamer` and survive the power cycle on the SD card. So `CONFIG/status.txt` reports the station's hostname and IP from the session that just ended — which, since the cable carries power, is exactly the session a TO is asking about when she moves it to her laptop.
+
+## Hardware
+
+| Item                    | Detail                                                                                                                                                                                                                              |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Raspberry Pi Zero W     | Takes`armhf` image                                                                                                                                                                                                                  |
+| microSD card            | 8 GB+. The image is small and read-mostly.                                                                                                                                                                                          |
+| USB-A → micro-USB cable | Into the Pi's**`USB`** port (the inner one, nearer the HDMI connector) — **not** `PWR`. Use a real data cable: many heavy "fast charge" cables have no data lines and are invisible to the host. **Power and data share one cable** |
+
+## Repository layout
+
+```
+slippi-beamer/
+├── README.md									this document
+├── image
+│   ├── build
+│   │   └── ...									dev-box-side build scripts + VM spec
+│   ├── dist
+│   │   └── ...									images and manifest file for rpi imager
+│   ├── scripts
+│   │   └── ...									beamer-side scripts and services
+│   ├── linux-build.sh							linux build script, used by CI
+│   └── mac-build.sh							mac build script
+├── .github
+│   └── workflows/publish.yml					tag -> image -> draft release
+└── tools
+    └── fake-beamer.py							pretend to be a station, for replay reporter dev
+```
+
+### Testing without a station
+
+Everything `replay-manager-for-slippi` talks to is an mDNS advertisement and four HTTP endpoints — no gadget, no LED, no Wii, so the app's fleet view can be developed and tested on a laptop. Build `slp-peek` natively first; it is portable C and compiles anywhere:
+
+```bash
+cc -Os -Wall -o /tmp/slp-peek image/scripts/slp-peek.c
+```
+
+```bash
+tools/fake-beamer.py --name beamer-stream-1 --port 8081 --replays ~/slp/stream1 --game ~/slp/live.slp
+```
+
+Run several on different ports to simulate a fleet — a client should honour the port a station advertises. `--unhealthy` and `--unreported` produce the two known failure states of `/status`.
 
 ## HTTP API
 
@@ -229,13 +236,27 @@ A reset does not refresh the cached `/status`, so `slippi_files` there stays sta
 
 The image bakes its own login, so the build needs to be told what it is:
 
-```bash
-BEAMER_USER_PASS='...' ./image/mac-build.sh
+```Shell
+BEAMER_USER_PASS='password' ./image/mac-build.sh
+```
+
+or
+
+```Shell
+BEAMER_USER_PASS='password' ./image/linux-build.sh
 ```
 
 `BEAMER_USER` renames the account, which defaults to `beamer`. The build **fails** without a password: a station has no console and is bus-powered by the console it is bolted to, so an image with no way in is an image you have to reflash to debug. The account gets passwordless `sudo`, the same shape stock Raspberry Pi OS uses for the account Imager creates.
 
-All images are byte-identical by design, so this is one shared password for the whole fleet, and it is in your shell history unless you take care. That is inherent to the design, not new — but it is worth knowing that it is what you are handing out.
+### Releasing
+
+Pushing a `v*` tag builds the image in GitHub Actions and leaves a **draft** release carrying the `.img.xz`, its `.meta` sidecar, and a manifest whose URLs point at that release.
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+Released images carry the login `beamer` / `password`. If this makes you uncomfortable security-wise, feel free to build your own image. I don't think its an issue - everyone in the venue has physical access to the Pi already :P
 
 ### Details
 
@@ -294,6 +315,7 @@ Roughly in boot order. Everything on the pre-bind side carries `OnFailure=beamer
 | `beamer-wifi-apply`  | Applies the regulatory domain and unblocks the radio.           |
 | `wifi-powersave-off` | Disables WiFi power save.                                       |
 | `check-net`          | Verifies the station joined its configured network.             |
+| `avahi-daemon`       | Publishes the`_beamer._tcp` record. Ordered after the bind.     |
 | `beamer-growfs`      | Grows the root filesystem, once.                                |
 | `status-check.timer` | Fires the status check every 10 s while the gadget is bound.    |
 | `status-check`       | Gadget state, game-in-progress detection, drives the flush.     |
@@ -302,7 +324,6 @@ Roughly in boot order. Everything on the pre-bind side carries `OnFailure=beamer
 | `flush-gadget-data`  | Copies finished replays off the image into the web root.        |
 | `gadget-eject-watch` | Waits for the host to eject, refreshes status, powers off.      |
 | `beamer-reset`       | Wipes the replay drive back to the template.                    |
-| `avahi-daemon`       | Publishes the`_beamer._tcp` record. Ordered after the bind.     |
 | `beamer-led-error`   | Puts the LED into the error blink.                              |
 
 #### Scripts
@@ -339,6 +360,4 @@ The **hostname** comes from `STATION-NAME`, not from the UUID: `load-conf.sh` re
 
 As a result, **names that slug to nothing fall back to the ID.** `STATION-NAME=拉拉` is a perfectly good name for `CONFIG/status.txt` and `GET /status`, and it carries there in full — but there is no hostname in it, so that station stays `beamer-<uuid>`.
 
-Nothing enforces uniqueness. Two stations named `Setup 2` claim the same hostname, the same way two hosts on any network would; the UUID underneath them stays distinct, and that is what `GET /status` and the replay index report.
-
-Derived rather than random so that it is stable across a card reflash: reflashing a unit gives back the same station instead of a new phantom device for the herding layer to reconcile against the one that just vanished. The identity follows the board, which is the thing bolted to the console — moving a card to a different board correctly yields a different station.
+Nothing enforces uniqueness. Two stations named `Setup 2` claim the same hostname, the same way two hosts on any network would; the UUID underneath them stays distinct, and that is what `GET /status` and the replay index report. Reflashing a board with an updated image will keep the same UUID - it's derived from hardware details!
