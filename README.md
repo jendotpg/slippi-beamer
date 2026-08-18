@@ -38,11 +38,13 @@ A Beamer's LED is a live readout of station health. It is the fastest way — an
 
 ## Setting up a new Beamer
 
-Download `beamer.rpi-imager-manifest` from the [latest release](https://github.com/jendotpg/slippi-beamer/releases/latest). Open the Raspberry Pi Imager, click App Options -> Content Repository -> EDIT -> Use custom file -> point it at that file -> APPLY & RESTART. Imager pulls the image itself from the release, so there is nothing to unzip. (If you built the image yourself, `image/dist/beamer.rpi-imager-manifest` is the same file pointing at your local copy instead.)
+Download `beamer.rpi-imager-manifest` from the [latest release](https://github.com/jendotpg/slippi-beamer/releases/latest). If you built the image yourself, `image/dist/beamer.rpi-imager-manifest` is your manifest file instead.
+
+Try double-clicking the manifest file - it should open the Raspberry Pi Imager. If it doesn't, open the Raspberry Pi Imager yourself, click App Options -> Content Repository -> EDIT -> Use custom file -> select the manifest file -> APPLY & RESTART.
 
 Then per station:
 
-1. Flash the `Beamer station <date> (armhf)` entry.
+1. Pick your board - `Raspberry Pi Zero W` - then flash the `Beamer station <date> (armhf)` entry onto a microSD card, and insert that card into the Beamer.
 2. Plug the Beamer into a laptop. The `BEAMER` drive appears with a `CONFIG/init-finished.txt` confirming provisioning completed.
 3. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
    1. See [Configuring a station](#configuring-a-station) for more details on this file.
@@ -84,6 +86,8 @@ On the gadget, `CONFIG/status.txt` reports the station's hostname and IP from th
 | Case                    | yeah... im still working on this lol....                                                                                                                                                                                            |                                                                                                                                                                            |
 
 This should come out to about \$30 ($16 pi + $7 sd card + $2 cable + $5 case) a unit at time of writing. Depending on venue and size of fleet, you may need to buy a separate router as well - not all WiFi networks can handle an extra 20 devices and very few can handle an extra 80! I use [The GL.Inet Flint 2](https://www.gl-inet.com/en-us/products/gl-mt6000) (~\$170 at time of writing). **Don't count on any of this as battle test yet - reach out to me if you want to start building these and I'll let you know what works and what doesn't.**
+
+Other boards will likely work here - in particular the Zero 2 W, 3 Model A+, 4 Model B, 400, 5, 500 - but the Zero W is the only one any of this is tested on. Everything except the Zero W and Zero 2 W needs its own power supply on top of the cable to the Wii: their USB device port cannot also power the board. The 400 and 500 have no activity LED, so the status readout the rest of this document leans on is simply dead there. They'll also need different data cables depending on which board you try. Reach out to me if you want to do this - I can walk you through the process.
 
 ## Repository layout
 

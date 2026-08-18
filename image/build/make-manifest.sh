@@ -31,10 +31,68 @@ fi
 
 say() { echo "==> $*"; }
 
+IMAGER_DEVICES=$(cat <<'EOF'
+  "imager": {
+    "devices": [
+      {
+        "name": "Raspberry Pi Zero W",
+        "description": "Zero W and Zero WH - the only supported board. Plain Zero (no W) lacks wifi and will not work.",
+        "icon": "https://downloads.raspberrypi.com/imager/icons/RPi_Zero.png",
+        "tags": ["pi1-32bit"],
+        "matching_type": "exclusive"
+      },
+      {
+        "name": "Raspberry Pi Zero 2 W",
+        "description": "Zero 2 W and Zero 2 WH. Untested, but wired like the Zero W.",
+        "icon": "https://downloads.raspberrypi.com/imager/icons/RPi_Zero_2_W.png",
+        "tags": ["pi3-64bit", "pi3-32bit"],
+        "matching_type": "exclusive"
+      },
+      {
+        "name": "Raspberry Pi 3 Model A+",
+        "description": "Untested. Needs a USB A-to-A cable and its own power supply. Not the 3B or 3B+ - those cannot do device mode at all.",
+        "icon": "https://downloads.raspberrypi.com/imager/icons/RPi_3.png",
+        "tags": ["pi3-64bit", "pi3-32bit"],
+        "matching_type": "exclusive"
+      },
+      {
+        "name": "Raspberry Pi 4 Model B",
+        "description": "Untested. Device mode is on the USB-C port, so the board needs its own 5V on the GPIO header.",
+        "icon": "https://downloads.raspberrypi.com/imager/icons/RPi_4.png",
+        "tags": ["pi4-64bit", "pi4-32bit"],
+        "matching_type": "exclusive"
+      },
+      {
+        "name": "Raspberry Pi 400",
+        "description": "Untested. Same USB-C power caveat as the Pi 4, and no activity LED to read station status off.",
+        "icon": "https://downloads.raspberrypi.com/imager/icons/RPi_4.png",
+        "tags": ["pi4-64bit", "pi4-32bit"],
+        "matching_type": "exclusive"
+      },
+      {
+        "name": "Raspberry Pi 5",
+        "description": "Untested. Device mode is on the USB-C port, so the board needs its own 5V on the GPIO header.",
+        "icon": "https://downloads.raspberrypi.com/imager/icons/RPi_5.png",
+        "tags": ["pi5-64bit", "pi5-32bit"],
+        "matching_type": "exclusive"
+      },
+      {
+        "name": "Raspberry Pi 500",
+        "description": "Untested. 500 and 500+. Same USB-C power caveat as the Pi 5, and no activity LED to read station status off.",
+        "icon": "https://downloads.raspberrypi.com/imager/icons/RPi_5.png",
+        "tags": ["pi5-64bit", "pi5-32bit"],
+        "matching_type": "exclusive"
+      }
+    ]
+  },
+EOF
+)
+
 ENTRIES=()
 for target in armhf; do
     case "$target" in
-        armhf) devices='"pi3-32bit", "pi1-32bit"'; boards='Pi Zero W and Pi Zero 2 W' ;;
+        armhf) devices='"pi1-32bit", "pi3-32bit", "pi4-32bit", "pi5-32bit"'
+               boards='Built and tested on the Pi Zero W; every other board the picker lists is untested.' ;;
     esac
 
     IMG=$(ls -t "$DIST"/beamer-*-"$target".img.xz 2>/dev/null | head -1 || true)
@@ -64,11 +122,11 @@ for target in armhf; do
         URL="file://$IMG"
     fi
 
-    say "$NAME -> $DATE, $boards"
+    say "$NAME -> $DATE"
     ENTRIES[${#ENTRIES[@]}]="$(cat <<EOF
     {
       "name": "Beamer station $DATE ($target)",
-      "description": "Wii Slippi beamer station. $boards.",
+      "description": "Wii Slippi beamer station. $boards",
       "icon": "https://downloads.raspberrypi.com/raspios_armhf/Raspberry_Pi_OS_(32-bit).png",
       "url": "$URL",
       "release_date": "$DATE",
@@ -85,6 +143,7 @@ done
 
 {
     echo '{'
+    echo "$IMAGER_DEVICES"
     echo '  "os_list": ['
     sep=""
     for entry in "${ENTRIES[@]}"; do
@@ -92,9 +151,37 @@ done
         sep=$',\n'
     done
     printf '\n  ]\n}\n'
-} > "$OUT"
+} > "$OUT.tmp"
 
-python3 -m json.tool "$OUT" >/dev/null || { echo "ERROR: emitted invalid JSON" >&2; exit 1; }
+python3 - "$OUT.tmp" <<'EOF' || { rm -f "$OUT.tmp"; exit 1; }
+import json, sys
+
+path = sys.argv[1]
+try:
+    m = json.load(open(path))
+except ValueError as e:
+    sys.exit(f"ERROR: emitted invalid JSON: {e}")
+
+# Both directions dead-end the user: an entry no board can reach is invisible,
+# and a board with nothing to offer leaves Next enabled and the OS list empty.
+selectable = {t for d in m["imager"]["devices"] for t in d["tags"]}
+offered = {t for e in m["os_list"] for t in e["devices"]}
+
+for entry in m["os_list"]:
+    tags = set(entry["devices"])
+    if not tags & selectable:
+        sys.exit(f"ERROR: no device in the picker can select {entry['name']!r} "
+                 f"(tagged {sorted(tags)}, picker offers {sorted(selectable)})")
+
+for device in m["imager"]["devices"]:
+    tags = set(device["tags"])
+    if not tags & offered:
+        sys.exit(f"ERROR: the picker offers {device['name']!r} but no image is "
+                 f"tagged for it (wants one of {sorted(tags)}, images carry "
+                 f"{sorted(offered)})")
+EOF
+
+mv "$OUT.tmp" "$OUT"
 
 cat <<EOF
 
