@@ -49,17 +49,43 @@ sudo -n true 2>/dev/null || {
 }
 
 # --- dependencies ---------------------------------------------------------
+apt_get() {
+    local limit=$1; shift
+    local what=$1 rc=0
+    timeout -k 30 "$limit" sudo env \
+        DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a \
+        apt-get -y \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            "$@" </dev/null || rc=$?
+    (( rc == 0 )) && return 0
+    if (( rc == 124 )); then
+        echo "ERROR: 'apt-get $what' made no progress within ${limit}s and was killed." >&2
+        echo "This is almost always a failing Ubuntu mirror rather than anything" >&2
+        echo "wrong with the build - check the Ign:/Err: lines above. Re-running is" >&2
+        echo "usually enough. SKIP_DEPS=1 skips this block on a host already set up." >&2
+    else
+        echo "ERROR: 'apt-get $what' failed (exit $rc)." >&2
+    fi
+    exit 1
+}
+
 # Keep in step with the first provision block of build/piforge.yaml: that list
 # and this one describe the same build host, one for lima and one for a real
 # Linux box, and a build that needs a new tool needs it in both.
 if [[ "${SKIP_DEPS:-0}" == "1" ]]; then
     say "skipping dependency install (SKIP_DEPS=1)"
 else
+    say "refreshing package lists"
+    apt_get 600 update
+
     say "installing build dependencies"
-    sudo DEBIAN_FRONTEND=noninteractive apt-get update
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    apt_get 900 install --no-install-recommends \
         e2fsprogs dosfstools fdisk mtools xz-utils curl ca-certificates \
         qemu-user-static binfmt-support binutils
+
+    say "dependencies installed"
 fi
 
 # --- qemu-arm in binfmt_misc ----------------------------------------------
