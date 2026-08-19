@@ -153,10 +153,11 @@ EOF
 # --- volatile journal -----------------------------------------------------
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/10-beamer.conf <<'EOF'
-# See bake.sh. The journal lives in /run and never reaches the SD card.
+# See bake.sh. The journal lives in /run and reaches the SD card only when an
+# error persists it - see beamer_persist_journal in beamer-common.sh.
 [Journal]
 Storage=volatile
-RuntimeMaxUse=8M
+RuntimeMaxUse=32M
 EOF
 if ! in_chroot; then
     systemctl restart systemd-journald

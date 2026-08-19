@@ -59,29 +59,14 @@ Linux can run a USB port in **device** mode rather than host mode. The `f_mass_s
 
 The critical constraint: the Beamer's OS may **read** the image but must **never write** to it while a host has it mounted. The Wii caches FAT metadata and free-cluster state; a host-side write leaves that cache stale and the Wii's next write lands in the wrong place. All Beamer-side access is read-only, through mtools, which parses FAT in userspace and never invokes the kernel filesystem driver.
 
-Never `mount` the image, not even `-o ro`. The kernel vfat driver assumes it owns the device and caches metadata aggressively; it will serve stale directory listings.
-
-There are three supported exceptions, and all of them work by writing only when no host can possibly hold the medium:
-
-- `scripts/reset-gadget-data.sh` ejects the medium first, so the host is forced to re-read rather than trusting its cache.
-- `load-conf.sh` and `station-init.sh` write `CONFIG/` in the **pre-bind window** — they run from `beamer-preflight.service` and `beamer-firstboot.service`, both ordered `Before=gadget.service`, so the image has not yet been handed to a UDC and nothing is attached to it. This window is the reason those two units, and only those two, sit in front of the bind.
-- `scripts/gadget-eject-watch.sh` waits for the **host** to eject. `removable` is set on the LUN, so an eject makes `f_mass_storage` close the backing file; `lun.0/file` reads empty and the image is unattached again. This is the only window in which the Pi can write something it did not know at boot.
-
-| written during the session | rotated at next boot into | published by                                              |
-| -------------------------- | ------------------------- | --------------------------------------------------------- |
-| `error.late.log`           | `error.prev.log`          | `CONFIG/error.txt`, prefixed `[previous boot]`            |
-| `status.late`              | `status.prev`             | `CONFIG/status.txt`, suffixed `(as of the previous boot)` |
-
-Both live in `/var/lib/beamer` - the non-volatile half of the Beamer state. The volatile half lives in `/run/beamer` on tmpfs and is rebuilt each boot.
-
-On the gadget, `CONFIG/status.txt` reports the station's hostname and IP from the session that just ended — which, since the cable carries power, is exactly the session a TO is asking about when she moves it to her laptop. Similarly, `CONFIG/error.txt` reports any errors from the session that just ended.
+**Never `mount` the image, not even `-o ro`. The kernel vfat driver assumes it owns the device and caches metadata aggressively; it will serve stale directory listings.** There are three supported exceptions, and all of them work by writing only when no host can possibly hold the medium - see [Filesystem odds and ends below](#Filesystem-odds-and-ends)
 
 ## Hardware
 
 | Item                    | Detail                                                                                                                                                                                                                              | Where I Source Them                                                                                                                                                        |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Raspberry Pi Zero W     | Takes`armhf` image                                                                                                                                                                                                                  | [www.newark.com/raspberry-pi/sc0020/single-board-computer-arm-cortex/dp/69AK9092](https://www.newark.com/raspberry-pi/sc0020/single-board-computer-arm-cortex/dp/69AK9092) |
-| microSD card            | 8 GB+ (shoot for 16GB - they're barely more expensive and will last much longer).                                                                                                                                                   | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793)                                     |
+| microSD card            | 8 GB+ (shoot for 16GB - they're barely more expensive and will last much longer).                                                                                                                                                   | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793)                                     |
 | USB-A → micro-USB cable | Into the Pi's**`USB`** port (the inner one, nearer the HDMI connector) — **not** `PWR`. Use a real data cable: many heavy "fast charge" cables have no data lines and are invisible to the host. **Power and data share one cable** | [www.cableleader.com/0-5ft-usb2-0-a-male-to-micro-b-male-cable-black.html](https://www.cableleader.com/0-5ft-usb2-0-a-male-to-micro-b-male-cable-black.html)               |
 | Case                    | yeah... im still working on this lol....                                                                                                                                                                                            |                                                                                                                                                                            |
 
@@ -273,6 +258,34 @@ Released images carry the login `beamer` / `password`. If this makes you uncomfo
 Raspberry Pi OS Lite, pinned by URL and SHA-256 in `image/build/targets/armhf.conf`. Further details are baked into the image at build time.
 
 cloud-init is purged rather than disabled. On a stock image it exists only to apply the Imager customisation screen's settings, and a Beamer needs none of them: it derives its own identity, deletes any WiFi profile it did not write, and now carries its own login. What it cost was a full Python startup on a single 1 GHz ARM11 core, on the critical path of every boot.
+
+#### Filesystem odds and ends
+
+An 8 GB card is the floor. Two of the numbers behind that are hard caps rather than estimates, so they are worth writing down.
+
+| what                              | size                                            | pinned by                                                     |
+| --------------------------------- | ----------------------------------------------- | ------------------------------------------------------------- |
+| boot partition                    | 512 MiB                                         | stock Raspberry Pi OS layout                                  |
+| rootfs as shipped                 | 1978 MiB — its own minimum plus 64 MB of slack  | `resize2fs -P`, then `MIN_BLOCKS + 16384` in `build-image.sh` |
+| rootfs ceiling once grown         | **8192 MiB**, no matter how large the card is   | `MAX_ROOT_MB` in `growfs.sh`                                  |
+| `/srv/gadget.img`                 | 1 GiB once the medium fills with replays        | `SIZE=1G` in `make-fs.sh`                                     |
+| `/var/lib/beamer/journald_dumps/` | 512 MB — 16 dumps against the 32 MB journal cap | `BEAMER_JOURNAL_KEEP`, `RuntimeMaxUse` in `bake.sh`           |
+| everything else                   | negligible                                      |                                                               |
+
+The following are the **only** supported times that it is valid to mount the filesystem image:
+
+1. `scripts/reset-gadget-data.sh` ejects the medium first, so the host is forced to re-read rather than trusting its cache.
+2. `load-conf.sh` and `station-init.sh` write `CONFIG/` in the **pre-bind window** — they run from `beamer-preflight.service` and `beamer-firstboot.service`, both ordered `Before=gadget.service`, so the image has not yet been handed to a UDC and nothing is attached to it. This window is the reason those two units, and only those two, sit in front of the bind.
+3. `scripts/gadget-eject-watch.sh` waits for the **host** to eject. `removable` is set on the LUN, so an eject makes `f_mass_storage` close the backing file; `lun.0/file` reads empty and the image is unattached again. This is the only window in which the Pi can write something it did not know at boot.
+
+| written during the session | rotated at next boot into | published by                                              |
+| -------------------------- | ------------------------- | --------------------------------------------------------- |
+| `error.late.log`           | `error.prev.log`          | `CONFIG/error.txt`, prefixed `[previous boot]`            |
+| `status.late`              | `status.prev`             | `CONFIG/status.txt`, suffixed `(as of the previous boot)` |
+
+Both live in `/var/lib/beamer` - the non-volatile half of the Beamer state. The volatile half lives in `/run/beamer` on tmpfs and is rebuilt each boot.
+
+`/var/lib/beamer/journald_dumps/`, within the non-volatile part of the Beamer state, stores journals from past boots. The journal itself is volatile, so the first `beamer_error` of a boot persists the whole journal into a numbered file that boot owns. Later errors in the same boot rewrite that same file, and the next boot takes a file of its own and cannot touch it. Only the newest 16 errored boot journals are kept.
 
 #### Fleet determinism
 

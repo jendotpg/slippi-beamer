@@ -19,6 +19,7 @@ BEAMER_GROWN="$BEAMER_STATE/grown"
 BEAMER_WIFI_HASH="$BEAMER_STATE/wifi.hash"
 BEAMER_ERR_LATE="$BEAMER_STATE/error.late.log"
 BEAMER_ERR_PREV="$BEAMER_STATE/error.prev.log"
+BEAMER_JOURNAL_DIR="$BEAMER_STATE/journald_dumps"
 BEAMER_STATUS_LATE="$BEAMER_STATE/status.late"
 BEAMER_STATUS_PREV="$BEAMER_STATE/status.prev"
 
@@ -41,6 +42,7 @@ BEAMER_WIFI_OUTCOME="$BEAMER_RUN/wifi-outcome"
 BEAMER_WIFI_COUNTRY="$BEAMER_RUN/wifi-country"
 BEAMER_WIFI_CHANGED="$BEAMER_RUN/wifi-changed"
 BEAMER_RESET_FLAG="$BEAMER_RUN/reset-in-progress"
+BEAMER_JOURNAL_SLOT="$BEAMER_RUN/journal-slot"
 
 BEAMER_BIND_UPTIME=/run/gadget-bind-uptime # also written by gadget-up.sh
 BEAMER_IFACE=${BEAMER_IFACE:-wlan0}
@@ -55,6 +57,8 @@ BEAMER_KEEP_DEFAULT=10
 BEAMER_KEEP_MAX=16
 # determined experimentally - past 2000, stat starts to actually cost something
 BEAMER_COUNT_CAP=${BEAMER_COUNT_CAP:-2000}
+# journal dumps kept in BEAMER_JOURNAL_DIR - unrelated to the replay keep above
+BEAMER_JOURNAL_KEEP=${BEAMER_JOURNAL_KEEP:-16}
 
 beamer_dirs() {
     [[ -d $BEAMER_STATE && -d $BEAMER_RUN ]] && return 0
@@ -109,6 +113,76 @@ beamer_log() {
     printf 'beamer[%s]: %s\n' "$component" "$*" >&2
 }
 
+beamer_journal_slot() {
+    BEAMER_JOURNAL_PATH=
+    if [[ -r "$BEAMER_JOURNAL_SLOT" ]]; then
+        read -r BEAMER_JOURNAL_PATH < "$BEAMER_JOURNAL_SLOT" || true
+    fi
+    if [[ -n "$BEAMER_JOURNAL_PATH" ]]; then
+        return 0
+    fi
+
+    mkdir -p "$BEAMER_JOURNAL_DIR" 2>/dev/null || return 1
+
+    local f num n=0
+    for f in "$BEAMER_JOURNAL_DIR"/*.log.new; do
+        if [[ -e $f ]]; then
+            rm -f "$f" || true # orphaned by a power cut mid-dump
+        fi
+    done
+    for f in "$BEAMER_JOURNAL_DIR"/[0-9]*.log; do
+        if [[ -e $f ]]; then
+            num=${f##*/}
+            num=${num%%-*}
+            if (( 10#${num:-0} > n )); then
+                n=$(( 10#$num ))
+            fi
+        fi
+    done
+
+    local up
+    read -r up _ < /proc/uptime 2>/dev/null || up=0
+    printf -v BEAMER_JOURNAL_PATH '%s/%06d-%(%Y%m%dT%H%M%SZ)T.log' \
+        "$BEAMER_JOURNAL_DIR" "$(( n + 1 ))" "$(( EPOCHSECONDS - ${up%.*} ))"
+
+    printf '%s\n' "$BEAMER_JOURNAL_PATH" > "$BEAMER_JOURNAL_SLOT" || true
+    return 0
+}
+
+beamer_journal_prune() {
+    local dumps=() f i n
+    for f in "$BEAMER_JOURNAL_DIR"/[0-9]*.log; do
+        if [[ -e $f ]]; then
+            dumps+=( "$f" )
+        fi
+    done
+
+    n=${#dumps[@]}
+    if (( n <= BEAMER_JOURNAL_KEEP )); then
+        return 0
+    fi
+    for (( i = 0; i < n - BEAMER_JOURNAL_KEEP; i++ )); do
+        rm -f "${dumps[i]}" || true
+    done
+    return 0
+}
+
+beamer_persist_journal() {
+    if ! beamer_journal_slot || [[ -z "$BEAMER_JOURNAL_PATH" ]]; then
+        return 0
+    fi
+
+    if journalctl --no-pager --no-hostname -o short-precise \
+            > "$BEAMER_JOURNAL_PATH.new" 2>/dev/null; then
+        mv -f "$BEAMER_JOURNAL_PATH.new" "$BEAMER_JOURNAL_PATH" || true
+        sync || true
+        beamer_journal_prune
+    else
+        rm -f "$BEAMER_JOURNAL_PATH.new" || true
+    fi
+    return 0
+}
+
 beamer_error() {
     local component=$1; shift
     local line first=1 target=$BEAMER_ERR_LOG
@@ -136,6 +210,7 @@ beamer_error() {
     printf 'beamer[%s]: ERROR: %s\n' "$component" "$*" >&2
 
     beamer_led error
+    beamer_persist_journal
 }
 
 beamer_rotate_errors() {
