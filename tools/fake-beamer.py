@@ -132,7 +132,7 @@ class Station:
             "udc": "fake",
             "host_state": "configured",
             "mtools": True,
-            "lighttpd": True,
+            "httpd": True,
             "sshd": True,
             "mdns": True,
             "game": game,

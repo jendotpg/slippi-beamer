@@ -175,7 +175,7 @@ The `game` field is `null` when the drive holds no readable replay. Otherwise `l
   "bind_time_s": 12.4,
   "host_state": "configured",
   "mtools": true,
-  "lighttpd": true,
+  "httpd": true,
   "sshd": true,
   "mdns": true,
   "result": "pass",

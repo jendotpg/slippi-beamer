@@ -36,7 +36,7 @@ write_fragment() {
         printf '  "wifi": %s,\n'     "$(beamer_json_strn "$F_WIFI")"
         printf '  "network": %s,\n'  "$(beamer_json_strn "$F_NETWORK")"
         printf '  "ip": %s,\n'       "$(beamer_json_strn "$F_IP")"
-        printf '  "lighttpd": %s,\n' "$(beamer_json_bool "$F_HTTP")"
+        printf '  "httpd": %s,\n'    "$(beamer_json_bool "$F_HTTP")"
         printf '  "sshd": %s,\n'     "$(beamer_json_bool "$F_SSH")"
         printf '  "mdns": %s,\n'     "$(beamer_json_bool "$F_MDNS")"
     } > "$tmp"
