@@ -130,6 +130,7 @@ cp -r "$REPO/scripts" "$HERE/bake.sh" "$ROOTFS/tmp/beamer-build/"
 chroot "$ROOTFS" env SCRIPTS=/tmp/beamer-build/scripts \
     BEAMER_USER="${BEAMER_USER:-beamer}" \
     BEAMER_USER_PASS="$BEAMER_USER_PASS" \
+    BEAMER_ARCH="$TARGET" \
     /bin/bash /tmp/beamer-build/bake.sh
 
 # --- 6. template image ----------------------------------------------------

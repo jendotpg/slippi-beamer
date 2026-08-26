@@ -6,7 +6,8 @@ I currently have ONE working beamer and have confirmed it works succesfully with
 
 Major TODO still:
 
-1. set up flint 2! write down exact configuration so its repeatable - perhaps its even worth building an openwrt image.... probably not though?
+1. fix clock bug - if you move from a wii in the future to a wii in the past, this wont find the newest replay to peek into succesfully (because it sorts file names lexicographically....)
+2. set up flint 2! write down exact configuration so its repeatable - perhaps its even worth building an openwrt image.... probably not though?
 
 ## Configuring a station
 
@@ -157,9 +158,12 @@ The `game` field is `null` when the drive holds no readable replay. Otherwise `l
 
 `char` and `color` are the human readable versions of `char_id` and `costume` respectively.
 
+`beamer_arch` is which build the station is running — the target the image was built for, so `armhf` for every station today. It is baked into the image at build time rather than probed at runtime, and a bake run by hand outside `build-image.sh` reports `unknown`. Stations on other hardware report their own value; the ESP32-S3 port reports `esp32`.
+
 ```json
 {
   "schema": 1,
+  "beamer_arch": "armhf",
   "generated": "2026-08-14T18:22:01Z",
   "station": "3f2a…",
   "station_name": "stream station 2",

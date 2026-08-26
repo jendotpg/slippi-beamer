@@ -53,6 +53,7 @@ BEAMER_LED_CMD=/usr/local/sbin/beamer-led.sh
 BEAMER_WEB_SLIPPI=/var/www/html/SLIPPI
 BEAMER_WEB_INDEX="$BEAMER_WEB_SLIPPI/index.json"
 BEAMER_SLP_PEEK=/usr/local/lib/beamer/slp-peek
+BEAMER_ARCH_FILE=/etc/beamer/arch
 BEAMER_KEEP_DEFAULT=10
 BEAMER_KEEP_MAX=16
 # determined experimentally - past 2000, stat starts to actually cost something
@@ -71,6 +72,14 @@ beamer_station_id() {
         read -r id < "$BEAMER_STATION_ID" || true
     fi
     printf '%s' "${id:-unknown}"
+}
+
+beamer_arch() {
+    local arch=
+    if [[ -r "$BEAMER_ARCH_FILE" ]]; then
+        read -r arch < "$BEAMER_ARCH_FILE" || true
+    fi
+    printf '%s' "${arch:-unknown}"
 }
 
 beamer_station_name() {
@@ -444,6 +453,7 @@ beamer_write_report() {
     {
         printf '{\n'
         printf '  "schema": 1,\n'
+        printf '  "beamer_arch": %s,\n' "$(beamer_json_str "$(beamer_arch)")"
         printf '  "generated": %s,\n' "$(beamer_json_str "$(beamer_iso_time)")"
         if [[ -s "$BEAMER_STATUS_FRAG" ]]; then cat "$BEAMER_STATUS_FRAG"; fi
         if [[ -s "$BEAMER_HEALTH_FRAG" ]]; then cat "$BEAMER_HEALTH_FRAG"; fi

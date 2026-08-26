@@ -15,6 +15,7 @@ IMAGE=/srv/gadget.img
 
 BEAMER_USER=${BEAMER_USER:-beamer}
 BEAMER_USER_PASS=${BEAMER_USER_PASS:-}
+BEAMER_ARCH=${BEAMER_ARCH:-unknown}
 
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 [[ -d "$SCRIPTS/systemd" ]] || { echo "ERROR: no scripts dir at $SCRIPTS" >&2; exit 1; }
@@ -213,6 +214,11 @@ SLP_RC=0
 }
 apt-get purge -y gcc libc6-dev
 apt-get autoremove -y --purge
+
+# --- the build stamp ------------------------------------------------------
+install -d -m 0755 /etc/beamer
+printf '%s\n' "$BEAMER_ARCH" > /etc/beamer/arch
+chmod 0644 /etc/beamer/arch
 
 # --- scripts and units ----------------------------------------------------
 install -d -m 0755                                               /usr/local/lib/beamer

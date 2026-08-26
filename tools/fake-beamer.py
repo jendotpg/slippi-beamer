@@ -118,6 +118,7 @@ class Station:
             game, generated = self.game, self.generated
         return {
             "schema": SCHEMA,
+            "beamer_arch": self.args.arch,
             "generated": generated,
             "station": self.station_id,
             "station_name": self.station_name,
@@ -289,6 +290,11 @@ def main():
     parser.add_argument("--station", default="", help="station uuid (derived if unset)")
     parser.add_argument("--station-name", default="", help="STATION-NAME value")
     parser.add_argument("--wifi", default="fake-net")
+    parser.add_argument(
+        "--arch",
+        default="armhf",
+        help="beamer_arch value; a station reports the target it was built for",
+    )
     parser.add_argument("--replays", default="", help="directory of .slp to serve")
     parser.add_argument("--game", default="", help=".slp to report as the current game")
     parser.add_argument("--served", type=int, default=DEFAULT_SERVED)
