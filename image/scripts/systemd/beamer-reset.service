@@ -1,8 +1,0 @@
-[Unit]
-Description=Wipe the replay drive back to the template image
-Requires=gadget.service
-After=gadget.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/reset-gadget-data.sh

@@ -1,9 +1,0 @@
-[Unit]
-Description=Put the status LED into the error pattern
-DefaultDependencies=no
-Conflicts=shutdown.target
-Before=shutdown.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/beamer-led.sh error
