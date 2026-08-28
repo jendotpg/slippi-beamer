@@ -189,6 +189,7 @@ fn status_body() -> String {
         &super::check::health(),
         &errors::json_errors(),
         errors::session_has_errors(),
+        &crate::warnings::labels(),
         match super::result() {
             super::NetResult::Ok => report::Verdict::Pass,
             super::NetResult::Pending => report::Verdict::Pending,

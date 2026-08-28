@@ -11,10 +11,10 @@ use crate::config::Outcome;
 use crate::errors::{self, Target};
 use crate::journal::{self, Phase};
 use crate::station::StationId;
-use crate::status::{self, Label, LcdPins, LedPins, Pins, State};
+use crate::status::{self, ErrorLabel, LcdPins, LedPins, Pins, State, WarningLabel};
 use crate::storage::fat::{WriteWindow, BASE_PATH};
 use crate::storage::{self, volume, Partition, SdCard};
-use crate::{net, scan, station};
+use crate::{net, scan, station, warnings};
 
 pub fn run() -> anyhow::Result<()> {
     // --- Set up process --------------------------------------------------
@@ -87,7 +87,7 @@ pub fn run() -> anyhow::Result<()> {
         Err(e) => {
             let detail = format!("{e}");
             errors::halt(
-                Label::NoSdCard,
+                ErrorLabel::NoSdCard,
                 "sd",
                 &["SDMMC would not initialise, or no card responded", &detail],
             )
@@ -112,7 +112,7 @@ pub fn run() -> anyhow::Result<()> {
     if let Err(e) = storage::msc::bind(&sd, &id) {
         let detail = format!("{e}");
         errors::halt(
-            Label::NoUsb,
+            ErrorLabel::NoUsb,
             "usb",
             &["the device never enumerated on the host", &detail],
         );
@@ -149,7 +149,7 @@ pub fn run() -> anyhow::Result<()> {
     if let Err(e) = net::spawn(p.modem, nvs, sd.clone(), plan) {
         errors::error(
             Target::Session,
-            Label::NoWifi,
+            ErrorLabel::NoWifi,
             "net",
             &["the network task would not start", &format!("{e}")],
         );
@@ -161,8 +161,8 @@ pub fn run() -> anyhow::Result<()> {
 
     let mut last = State::Booting;
     let mut last_activity = (false, false);
-    let mut configured_since: Option<std::time::Instant> = None;
-    let mut reported_no_read = false;
+    let mut usb_since = std::time::Instant::now();
+    let mut warned_no_host = false;
     let mut reported_bad_read = false;
     let mut writing = Hold::new(WRITE_HOLD);
     let mut sending = Hold::new(SEND_HOLD);
@@ -170,6 +170,12 @@ pub fn run() -> anyhow::Result<()> {
         let is_writing = writing.poll(storage::msc::writes_ok(), storage::msc::cache_dirty() > 0)
             || scan::game_live();
         let is_sending = sending.poll(net::transfers_started(), net::transfers_in_flight() > 0);
+        let usb_ok = storage::msc::mounted() && storage::msc::reads_ok() > 0;
+        let waiting = !usb_ok && storage::msc::media_present();
+        if !waiting {
+            usb_since = std::time::Instant::now();
+        }
+        let settled = !waiting || usb_since.elapsed() >= HOST_GRACE;
 
         let now = if !storage::msc::media_present() {
             State::Off
@@ -177,12 +183,11 @@ pub fn run() -> anyhow::Result<()> {
             State::Error
         } else if is_writing || is_sending {
             State::Busy
-        } else if net::result() == net::NetResult::Pending
-            && storage::msc::mounted()
-            && storage::msc::reads_ok() > 0
-        {
+        } else if !settled || (net::result() == net::NetResult::Pending && usb_ok) {
             State::Booting
-        } else if storage::msc::mounted() && storage::msc::reads_ok() > 0 {
+        } else if warnings::any() {
+            State::Warning
+        } else if usb_ok {
             State::Idle
         } else {
             State::Booting
@@ -204,29 +209,22 @@ pub fn run() -> anyhow::Result<()> {
             last = now;
         }
 
-        match (storage::msc::mounted(), storage::msc::reads_ok()) {
-            (true, 0) => {
-                let since = configured_since.get_or_insert_with(std::time::Instant::now);
-                if !reported_no_read && since.elapsed() >= READ_GRACE {
-                    reported_no_read = true;
-                    let detail = format!(
-                        "first transfer error 0x{:x}, {} mount(s)",
-                        storage::msc::first_err(),
-                        storage::msc::mounts(),
-                    );
-                    errors::error(
-                        Target::Late,
-                        Label::NoUsb,
-                        "usb",
-                        &[
-                            "the host configured us but has read nothing",
-                            &detail,
-                            "the card answered at probe; the transfer path did not",
-                        ],
-                    );
-                }
+        if !warned_no_host && waiting && usb_since.elapsed() >= HOST_GRACE {
+            warned_no_host = true;
+            if storage::msc::mounted() {
+                log::warn!(
+                    "the host configured us but has read nothing: first transfer error 0x{:x}, {} mount(s)",
+                    storage::msc::first_err(),
+                    storage::msc::mounts(),
+                );
+            } else {
+                log::warn!("nothing has enumerated us in {}s", HOST_GRACE.as_secs());
             }
-            _ => configured_since = None,
+            warnings::set(WarningLabel::NoHost, true);
+        }
+        if warned_no_host && !waiting {
+            warned_no_host = false;
+            warnings::set(WarningLabel::NoHost, false);
         }
 
         if !reported_bad_read {
@@ -239,7 +237,7 @@ pub fn run() -> anyhow::Result<()> {
                 );
                 errors::error(
                     Target::Late,
-                    Label::SdUnreadable,
+                    ErrorLabel::SdUnreadable,
                     "sd",
                     &[
                         "the card stopped answering transfers",
@@ -337,7 +335,7 @@ fn eject(sd: &SdCard, id: &StationId) {
     if let Err(e) = storage::msc::flush_all() {
         errors::error(
             Target::Late,
-            Label::SdUnreadable,
+            ErrorLabel::SdUnreadable,
             "sd",
             &["could not flush the write cache on eject", &format!("{e}")],
         );
@@ -359,7 +357,7 @@ fn eject(sd: &SdCard, id: &StationId) {
     log::info!("eject complete: safe to unplug");
 }
 
-const READ_GRACE: Duration = Duration::from_secs(10);
+const HOST_GRACE: Duration = Duration::from_secs(10); // time until "NO WII" warning
 
 fn reset_reason() -> &'static str {
     journal::reset_name(unsafe { esp_idf_svc::sys::esp_reset_reason() })
@@ -434,7 +432,7 @@ fn check_partition(sd: &SdCard) {
             );
             errors::error(
                 Target::Session,
-                Label::WrongFormat,
+                ErrorLabel::WrongFormat,
                 "sd",
                 &[
                     "this card is partitioned larger than a Beamer supports",
@@ -446,7 +444,7 @@ fn check_partition(sd: &SdCard) {
         Partition::Missing => {
             errors::error(
                 Target::Session,
-                Label::WrongFormat,
+                ErrorLabel::WrongFormat,
                 "sd",
                 &[
                     "no FAT32 partition on this card",
@@ -459,7 +457,7 @@ fn check_partition(sd: &SdCard) {
             let detail = format!("{e}");
             errors::error(
                 Target::Session,
-                Label::SdUnreadable,
+                ErrorLabel::SdUnreadable,
                 "sd",
                 &["could not read the partition table", &detail],
             );
@@ -474,7 +472,7 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
             let detail = format!("{e}");
             errors::error(
                 Target::Late,
-                Label::SdUnreadable,
+                ErrorLabel::SdUnreadable,
                 "sd",
                 &[
                     "a card is present but its filesystem will not mount",
@@ -521,13 +519,18 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
             );
             for e in problems {
                 let [head, detail] = e.lines();
-                errors::error(Target::Session, Label::BadConfig, "config", &[head, detail]);
+                errors::error(
+                    Target::Session,
+                    ErrorLabel::BadConfig,
+                    "config",
+                    &[head, detail],
+                );
             }
         }
         Outcome::Unreadable(why) => {
             errors::error(
                 Target::Session,
-                Label::NoConfig,
+                ErrorLabel::NoConfig,
                 "config",
                 &[
                     "CONFIG/config.txt could not be read",

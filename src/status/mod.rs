@@ -13,7 +13,7 @@ use esp_idf_svc::hal::gpio::{Gpio1, Gpio2, Gpio3, Gpio38, Gpio39, Gpio4, Gpio40,
 use esp_idf_svc::hal::spi::{SPI2, SPI3};
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 
-pub use labels::Label;
+pub use labels::{ErrorLabel, WarningLabel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -23,6 +23,7 @@ pub enum State {
     Error = 2,
     Off = 3,
     Busy = 4,
+    Warning = 5,
 }
 
 impl State {
@@ -32,12 +33,9 @@ impl State {
             2 => State::Error,
             3 => State::Off,
             4 => State::Busy,
+            5 => State::Warning,
             _ => State::Booting,
         }
-    }
-
-    pub fn busy(self) -> bool {
-        matches!(self, State::Booting | State::Busy)
     }
 }
 
@@ -55,10 +53,12 @@ pub struct Detail {
     pub writing: bool, // to sd card
     pub sending: bool, // over wifi
     pub net: Net,
-    pub replays: Option<u32>,
-    pub label: Option<Label>, // of the FIRST error
-    pub head: String,         // of the FIRST error
+    pub files: Option<(u32, u32)>, // replays on the card, and the file cap
+    pub label: Option<ErrorLabel>, // of the FIRST error
+    pub head: String,              // of the FIRST error
     pub more: u32,
+    pub warn: Option<WarningLabel>, // the most severe warning standing
+    pub warn_more: u32,
 }
 
 static STATE: AtomicU8 = AtomicU8::new(State::Booting as u8);
@@ -109,11 +109,11 @@ pub fn set_activity(writing: bool, sending: bool) {
     });
 }
 
-pub fn set_replays(n: u32) {
-    publish(|d| d.replays = Some(n));
+pub fn set_files(files: u32, cap: u32) {
+    publish(|d| d.files = Some((files, cap)));
 }
 
-pub(crate) fn set_error(label: Label, head: &str, more: u32) {
+pub(crate) fn set_error(label: ErrorLabel, head: &str, more: u32) {
     publish(|d| {
         if d.label.is_none() {
             d.label = Some(label);
@@ -121,6 +121,13 @@ pub(crate) fn set_error(label: Label, head: &str, more: u32) {
             d.head.push_str(head);
         }
         d.more = more;
+    });
+}
+
+pub(crate) fn set_warning(warn: Option<WarningLabel>, more: u32) {
+    publish(|d| {
+        d.warn = warn;
+        d.warn_more = more;
     });
 }
 
@@ -135,7 +142,7 @@ pub const DOTS_MAX: u64 = 3;
 
 fn led_bright(state: State, ms: u64) -> bool {
     match state {
-        State::Booting => (ms / BOOT_HALF_MS) % 2 == 0,
+        State::Booting | State::Warning => (ms / BOOT_HALF_MS) % 2 == 0,
         State::Error => (ms / ERROR_HALF_MS) % 2 == 0,
         // Solid, in their own colours. `Off` never reads this.
         State::Idle | State::Busy | State::Off => true,

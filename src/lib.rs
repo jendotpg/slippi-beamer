@@ -13,5 +13,6 @@ mod panic;
 mod scan;
 mod status;
 mod storage;
+mod warnings;
 
 pub use boot::run;

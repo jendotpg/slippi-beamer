@@ -139,7 +139,7 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         Ok(l) => l,
         Err(e) => {
             fail(
-                crate::status::Label::NoWifi,
+                crate::status::ErrorLabel::NoWifi,
                 &["the system event loop would not start", &format!("{e}")],
             );
             set_result(NetResult::Fail);
@@ -172,7 +172,7 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         Ok(s) => Some(s),
         Err(e) => {
             fail(
-                crate::status::Label::NoHttp,
+                crate::status::ErrorLabel::NoHttp,
                 &["nothing answered on port 80", &format!("{e}")],
             );
             None
@@ -183,7 +183,7 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         Ok(m) => Some(m),
         Err(e) => {
             fail(
-                crate::status::Label::NoMdns,
+                crate::status::ErrorLabel::NoMdns,
                 &[
                     "this station will not appear in a discovery browse",
                     &format!("{e}"),
@@ -255,6 +255,6 @@ fn stand_down(
     log::warn!("network down; the card is still recording");
 }
 
-fn fail(label: crate::status::Label, lines: &[&str]) {
+fn fail(label: crate::status::ErrorLabel, lines: &[&str]) {
     crate::errors::error(crate::errors::Target::Session, label, "net", lines);
 }

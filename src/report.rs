@@ -11,6 +11,7 @@ pub const UDC: &str = "esp32s3-otg";
 pub enum Verdict {
     Pass,
     Pending,
+    Warn,
     Fail,
 }
 
@@ -19,6 +20,7 @@ impl Verdict {
         match self {
             Verdict::Pass => "pass",
             Verdict::Pending => "pending",
+            Verdict::Warn => "warn",
             Verdict::Fail => "fail",
         }
     }
@@ -54,9 +56,15 @@ pub fn status_json(
     health: &Health,
     errors: &[String],
     has_errors: bool,
+    warnings: &[&str],
     net: Verdict,
 ) -> String {
-    let result = if has_errors { Verdict::Fail } else { net };
+    let result = match (has_errors, net) {
+        (true, _) | (_, Verdict::Fail) => Verdict::Fail,
+        (_, Verdict::Pending) => Verdict::Pending,
+        _ if !warnings.is_empty() => Verdict::Warn,
+        (_, v) => v,
+    };
 
     let mut s = String::with_capacity(1024);
     s.push_str("{\n");
@@ -100,6 +108,10 @@ pub fn status_json(
 
     s.push_str("  \"errors\": ");
     json_array(&mut s, errors);
+    s.push_str(",\n");
+
+    s.push_str("  \"warnings\": ");
+    json_array(&mut s, warnings);
     s.push('\n');
     s.push('}');
     s.push('\n');
@@ -149,7 +161,7 @@ fn line_str(out: &mut String, key: &str, value: Option<&str>) {
     out.push_str(",\n");
 }
 
-fn json_array(out: &mut String, items: &[String]) {
+fn json_array<S: AsRef<str>>(out: &mut String, items: &[S]) {
     if items.is_empty() {
         out.push_str("[]");
         return;
@@ -160,7 +172,7 @@ fn json_array(out: &mut String, items: &[String]) {
             out.push(',');
         }
         out.push_str("\n    \"");
-        escape_json_into(item, out);
+        escape_json_into(item.as_ref(), out);
         out.push('"');
     }
     out.push_str("\n  ]");

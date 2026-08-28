@@ -8,7 +8,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 
-use crate::status::{self, Label, State};
+use crate::status::{self, ErrorLabel, State};
 
 const NAMESPACE: &str = "beamer";
 const KEY_LATE: &str = "err_late";
@@ -74,7 +74,7 @@ pub fn init(part: EspDefaultNvsPartition) {
     }
 }
 
-pub fn error(target: Target, label: Label, component: &str, lines: &[&str]) {
+pub fn error(target: Target, label: ErrorLabel, component: &str, lines: &[&str]) {
     let Some((head, rest)) = lines.split_first() else {
         return;
     };
@@ -119,7 +119,7 @@ pub fn error(target: Target, label: Label, component: &str, lines: &[&str]) {
 }
 
 /// Turns off the write-back cache
-fn quiesce(label: Label) {
+fn quiesce(label: ErrorLabel) {
     use crate::storage::msc;
     msc::set_policy(if label.is_storage_fault() {
         msc::REFUSE
@@ -149,7 +149,7 @@ pub fn record_previous(component: &str, lines: &[&str]) {
     append(&mut store().prev, &entry);
 }
 
-pub fn halt(label: Label, component: &str, lines: &[&str]) -> ! {
+pub fn halt(label: ErrorLabel, component: &str, lines: &[&str]) -> ! {
     error(Target::Late, label, component, lines);
     loop {
         std::thread::sleep(std::time::Duration::from_secs(60));

@@ -22,6 +22,7 @@ use crate::slp;
 use crate::status;
 use crate::storage::fat::ReadWindow;
 use crate::storage::{msc, SdCard};
+use crate::warnings::{self, WarningLabel};
 
 const TICK: Duration = Duration::from_secs(1);
 const LIST_EVERY: Duration = Duration::from_secs(10);
@@ -69,7 +70,9 @@ pub fn forget_all() {
         let Some(s) = guard.as_mut() else { return };
         s.clear(uptime_s());
     }
-    status::set_replays(0);
+    let file_cap = FILE_CAP.load(Ordering::Relaxed);
+    warnings::set_fill(0, file_cap);
+    status::set_files(0, file_cap);
 }
 
 pub fn refresh() {
@@ -82,7 +85,6 @@ pub fn spawn(sd: Arc<SdCard>, station: String, cap: usize, file_cap: u32) -> any
     FILE_CAP.store(file_cap, Ordering::Relaxed);
     *lock(&SET) = Some(PublishedSet::new(station, cap));
     *lock(&TRACKER) = Some(Tracker::with_card(sd));
-    status::set_replays(0);
 
     ThreadSpawnConfiguration {
         name: Some(c"scan"),
@@ -220,6 +222,7 @@ impl Tracker {
                     f.mtools = false; // this is a bad sign, but not an error - it can come back.
                     f.host_state = msc::host_state();
                 }
+                warnings::set(WarningLabel::DriveFailing, true);
                 self.note_mount_failure(&format!("{e}"));
                 return;
             }
@@ -240,10 +243,13 @@ impl Tracker {
             Ok(v) => v,
             Err(e) => {
                 log::warn!("scan: could not list SLIPPI/: {e}");
-                let mut f = lock(&FAST);
-                let f = f.get_or_insert_with(report::Fast::default);
-                f.mtools = false;
-                f.host_state = msc::host_state();
+                {
+                    let mut f = lock(&FAST);
+                    let f = f.get_or_insert_with(report::Fast::default);
+                    f.mtools = false;
+                    f.host_state = msc::host_state();
+                }
+                warnings::set(WarningLabel::DriveFailing, true);
                 return;
             }
         };
@@ -264,6 +270,11 @@ impl Tracker {
             f.slippi_files = count;
             f.slippi_files_capped = capped;
         }
+
+        let file_cap = FILE_CAP.load(Ordering::Relaxed);
+        warnings::set(WarningLabel::DriveFailing, false);
+        warnings::set_fill(count, file_cap);
+        status::set_files(count, file_cap);
 
         if first {
             log::info!("scan: baseline -- {count} replay(s) on the card, none served");
@@ -319,7 +330,7 @@ impl Tracker {
         }
         crate::errors::error(
             crate::errors::Target::Late,
-            status::Label::SdUnreadable,
+            status::ErrorLabel::SdUnreadable,
             "sd",
             &[
                 "the volume has stopped mounting for reading",
@@ -337,7 +348,6 @@ impl Tracker {
             let n = set.len();
             drop(guard);
             log::info!("scan: publishing {name} ({size} B); {n} replay(s) served");
-            status::set_replays(n as u32);
         }
     }
 

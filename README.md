@@ -18,13 +18,15 @@ Major TODOs still:
 
 4. auto-delete files during prebind window (configurable with a debug knob)
 5. stop serving on eject -> shutdown
-6. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
-7. Fleet testing. Multiple stations, mDNS name collisions, AP contention.
-8. support other boards with different pinouts! different build options, maybe?
-   1. order and test Waveshare ESP32-S3-LCD-1.47 version
+6. provide a way to update config files OTA
+7. audit /status json
+8. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
+9. Fleet testing. Multiple stations, mDNS name collisions, AP contention.
+10. support other boards with different pinouts! different build options, maybe?
+    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-9. colorblind mode? amber > blue, perhaps, meaning
-10. screen prettiness
+11. colorblind mode? amber > blue, perhaps, meaning
+12. screen prettiness
     1. transferring progress bar and`Content-Length` on replay responses
     2. show how much drive space is empty on idle screen!
     3. ip shown better?
@@ -41,7 +43,7 @@ Major TODOs still:
 | `HIDDEN`             | `false`        | Whether the network broadcasts its name.                                                                                                                   |
 | `STATION-NAME`       | the station ID | What to call this station. Appears as`station_name` in `GET /status`, and as the station's hostname (slugged - see [Station Identity](#station-identity)). |
 | `NUM-REPLAYS-SERVED` | `10`           | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                   |
-| `FILE-CAP`           | `512`          | How many replays the station counts on the card before it stops counting. 1 to 2048.                                                                       |
+| `FILE-CAP`           | `512`          | How many replays the station counts on the card before it stops counting. 1 to 2048. Past 75% it warns; at the cap it warns and stops serving new replays. |
 | `LED-BRIGHTNESS`     | `20`           | The status LED, 0 to 100 percent.                                                                                                                          |
 | `DEBUG`              | `false`        | Whether to keep a`LOGS/debug.txt` of each boot. Off means the journal records nothing at all. These files are never deleted automatically.                 |
 
@@ -55,7 +57,8 @@ A Beamer's screen and LED are live readouts of station health. They are the fast
 | -------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------- | --------------- |
 | An indeterminate loading circle, one rotation per second             | Slow even blink, about once a second (**amber**)     | Booting.                                                                          | no              |
 | `WRITING` or `SENDING`, with moving dots, over `DO NOT UNPLUG`       | Solid (**amber**)                                    | Busy. A game is being recorded, or a file is being served.                        | no              |
-| The station name, large. IP and replay count small beneath it.       | Solid (**green**)                                    | Healthy and idle. Everything is on the card.                                      | yes             |
+| The station name, large. IP and how full the card is beneath it.     | Solid (**green**)                                    | Healthy and idle. Everything is on the card.                                      | yes             |
+| A warning label, large. One line of advice, then the station name.   | Slow even blink, about once a second (**green**)     | Working but with a warning.                                                       | yes             |
 | The error label, large. One line of detail, then where to read more. | Fast even blink, about five times a second (**red**) | Something went wrong (or this is a freshly flashed Beamer on its first boot).     | yes             |
 | Dark, backlight off                                                  | Dark                                                 | Beamer has been ejected and is finished.                                          | yes             |
 | Dark, backlight off                                                  | Solid (**red**)                                      | Stopped. It hit a fault it could not recover from. Unplug it and plug it back in. | yes             |
@@ -134,6 +137,8 @@ Timestamps are meaningless - it's just a monotonic clock with boot at the UNIX e
 
 `sshd` is always `false`**.**
 
+`result` is `"pass"`, `"pending"`, `"warn"` or `"fail"`. `"warn"` means the `warnings` array is non-empty and `errors` is not: the station is still recording, still serving and still safe to unplug, but something about it is off. An error always outranks a warning.
+
 ```json
 {
   "schema": 1,
@@ -157,7 +162,8 @@ Timestamps are meaningless - it's just a monotonic clock with boot at the UNIX e
   "sshd": false,
   "mdns": true,
   "result": "pass",
-  "errors": []
+  "errors": [],
+  "warnings": []
 }
 ```
 
@@ -238,21 +244,32 @@ Hold the button on the side of the board while plugging it in to enter download 
 
 ### Error labels
 
-| Label           | What happened                                                                       |
-| --------------- | ----------------------------------------------------------------------------------- |
-| `NO ID`         | The board's factory MAC is unset or all zeroes. Refusing to boot.                   |
-| `NO SD CARD`    | The card slot came up empty, or no card responded.                                  |
-| `SD UNREADABLE` | A card is present but its filesystem will not mount.                                |
-| `WRONG FORMAT`  | A card is readable, but has no FAT32 partition or one over 16 GiB.                  |
-| `NO CONFIG`     | `CONFIG/config.txt` could not be read.                                              |
-| `BAD CONFIG`    | The file was read and rejected. The detail line names the bad key.                  |
-| `NO USB`        | The device never enumerated on the host.                                            |
-| `NO WIFI`       | Did not associate with the configured SSID.                                         |
-| `WRONG WIFI`    | Associated, but with a different network than`config.txt` asks for.                 |
-| `NO IP`         | Associated, but the network handed out no address.                                  |
-| `NO HTTP`       | Nothing answered on port 80. It is collecting replays it cannot serve.              |
-| `NO MDNS`       | It will not appear in a discovery browse. Replays are unaffected.                   |
-| `CRASHED`       | The firmware panicked. The faulting task is parked; the station is still recording. |
+| Label           | What happened                                                                                              |
+| --------------- | ---------------------------------------------------------------------------------------------------------- |
+| `NO ID`         | The board's factory MAC is unset or all zeroes. Refusing to boot.                                          |
+| `NO SD CARD`    | The card slot came up empty, or no card responded.                                                         |
+| `SD UNREADABLE` | A card is present but its filesystem will not mount.                                                       |
+| `WRONG FORMAT`  | A card is readable, but has no FAT32 partition or one over 16 GiB.                                         |
+| `NO CONFIG`     | `CONFIG/config.txt` could not be read.                                                                     |
+| `BAD CONFIG`    | The file was read and rejected. The detail line names the bad key.                                         |
+| `NO USB`        | The USB stack would not start. The station halts. (A host that simply never reads is `NO WII`, a warning.) |
+| `NO WIFI`       | Did not associate with the configured SSID.                                                                |
+| `WRONG WIFI`    | Associated, but with a different network than`config.txt` asks for.                                        |
+| `NO IP`         | Associated, but the network handed out no address.                                                         |
+| `NO HTTP`       | Nothing answered on port 80. It is collecting replays it cannot serve.                                     |
+| `NO MDNS`       | It will not appear in a discovery browse. Replays are unaffected.                                          |
+| `CRASHED`       | The firmware panicked. The faulting task is parked; the station is still recording.                        |
+
+### Warning labels
+
+| Label           | What is off                                                                                              |
+| --------------- | -------------------------------------------------------------------------------------------------------- |
+| `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.             |
+| `DRIVE FULL`    | `FILE-CAP` replays are on the card. New ones are no longer served. Delete some.                          |
+| `NO WII`        | Nothing has read this drive in ten seconds — a charger, a dead port, or a console that never mounted it. |
+| `DRIVE FILLING` | The card is past 75% of `FILE-CAP`. Delete replays before it stops serving new ones.                     |
+
+### A warning about FAT cache
 
 The Wii's FAT cache lives in the Wii's memory: write a directory entry while the Wii holds the medium and the Wii's next writeback clobbers it, or both of you allocate the same clusters and a replay is lost. So the firmware writes to the volume in exactly two windows, and both work by writing only when no host can possibly hold the medium:
 

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use crate::errors::{self, Target};
 use crate::journal;
-use crate::status::Label;
+use crate::status::ErrorLabel;
 
 static IN_PANIC: AtomicBool = AtomicBool::new(false);
 
@@ -42,7 +42,7 @@ pub fn install() {
 
         errors::error(
             Target::Late,
-            Label::Crashed,
+            ErrorLabel::Crashed,
             "panic",
             &[
                 &head,

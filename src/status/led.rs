@@ -58,17 +58,17 @@ impl<'d> Led<'d> {
         const AMBER: (u8, u8, u8) = (255, 140, 0);
         const GREEN: (u8, u8, u8) = (0, 255, 0);
         const RED: (u8, u8, u8) = (255, 0, 0);
+        const DARK: (u8, u8, u8) = (0, 0, 0);
 
         if global == 0 || state == State::Off {
             return self.set(0, 0, 0, 0);
         }
 
-        let (r, g, b) = if state.busy() {
-            AMBER
-        } else if state == State::Error {
-            RED
-        } else {
-            GREEN
+        let (r, g, b) = match state {
+            State::Booting | State::Busy => AMBER,
+            State::Idle | State::Warning => GREEN,
+            State::Error => RED,
+            State::Off => DARK,
         };
 
         if bright {

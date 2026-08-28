@@ -151,8 +151,8 @@ impl Sha1 {
     }
 }
 
-pub fn identity() -> Result<StationId, crate::status::Label> {
-    use crate::status::Label;
+pub fn identity() -> Result<StationId, crate::status::ErrorLabel> {
+    use crate::status::ErrorLabel;
     use esp_idf_svc::sys::{esp_efuse_mac_get_default, ESP_OK};
 
     let mut mac = [0u8; 6];
@@ -160,7 +160,7 @@ pub fn identity() -> Result<StationId, crate::status::Label> {
     let err = unsafe { esp_efuse_mac_get_default(mac.as_mut_ptr()) };
     if err != ESP_OK {
         log::error!("esp_efuse_mac_get_default failed: {err}");
-        return Err(Label::NoId);
+        return Err(ErrorLabel::NoId);
     }
-    StationId::from_mac(mac).ok_or(Label::NoId)
+    StationId::from_mac(mac).ok_or(ErrorLabel::NoId)
 }

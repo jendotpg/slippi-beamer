@@ -337,6 +337,7 @@ impl<'d> Lcd<'d> {
         match state {
             State::Booting => {}
             State::Idle => self.idle(d),
+            State::Warning => self.warning(d),
             State::Error => self.error(d),
             State::Busy => self.busy(d),
             State::Off => unreachable!(),
@@ -350,17 +351,21 @@ impl<'d> Lcd<'d> {
         self.dots(d, 1);
 
         self.text(46, 1, "DO NOT UNPLUG", WHITE, BLACK);
+        self.name_line(64, d);
+    }
 
-        if !d.name.is_empty() {
-            let mut rows = [""];
-            let fit = text::fit(&d.name, font::cols(W as usize, 1), &mut rows);
-            if fit.truncated {
-                let mut line = Line::new();
-                line.push(rows[0]).push(ELLIPSIS);
-                self.text(64, 1, line.as_str(), GREY, BLACK);
-            } else {
-                self.text(64, 1, rows[0], GREY, BLACK);
-            }
+    fn name_line(&mut self, y: u16, d: &Detail) {
+        if d.name.is_empty() {
+            return;
+        }
+        let mut rows = [""];
+        let fit = text::fit(&d.name, font::cols(W as usize, 1), &mut rows);
+        if fit.truncated {
+            let mut line = Line::new();
+            line.push(rows[0]).push(ELLIPSIS);
+            self.text(y, 1, line.as_str(), GREY, BLACK);
+        } else {
+            self.text(y, 1, rows[0], GREY, BLACK);
         }
     }
 
@@ -437,12 +442,66 @@ impl<'d> Lcd<'d> {
             }
         }
 
-        if let Some(n) = d.replays {
-            let mut line = Line::new();
-            line.push_num(n)
-                .push(if n == 1 { " replay" } else { " replays" });
-            self.text(64, 1, line.as_str(), GREY, BLACK);
+        if let Some((files, cap)) = d.files {
+            self.text(64, 1, Self::fill_line(files, cap).as_str(), GREY, BLACK);
         }
+    }
+
+    fn fill_line(files: u32, cap: u32) -> Line {
+        let pct = files
+            .saturating_mul(100)
+            .checked_div(cap)
+            .unwrap_or(0)
+            .min(100);
+
+        let mut long = Line::new();
+        long.push_num(files)
+            .push("/")
+            .push_num(cap)
+            .push(" replays (")
+            .push_num(pct)
+            .push("% full)");
+        if long.as_str().chars().count() <= font::cols(W as usize, 1) {
+            return long;
+        }
+
+        let mut short = Line::new();
+        short
+            .push_num(files)
+            .push("/")
+            .push_num(cap)
+            .push(" (")
+            .push_num(pct)
+            .push("% full)");
+        short
+    }
+
+    fn warning(&mut self, d: &Detail) {
+        let label = d.warn.map_or("WARNING", |w| w.as_str());
+        self.text(6, 2, label, AMBER, BLACK);
+
+        let reason = d.warn.map_or("", |w| w.reason());
+        let cols = font::cols(W as usize, 1);
+        let mut rows = ["", ""];
+        let fit = text::fit(reason, cols, &mut rows);
+        let mut y = 26;
+        for (i, row) in rows[..fit.used].iter().enumerate() {
+            if i + 1 == fit.used && fit.truncated {
+                let mut line = Line::new();
+                line.push(row).push(ELLIPSIS);
+                self.text(y, 1, line.as_str(), WHITE, BLACK);
+            } else {
+                self.text(y, 1, row, WHITE, BLACK);
+            }
+            y += font::H as u16 + 3;
+        }
+
+        if d.warn_more > 0 {
+            let mut line = Line::new();
+            line.push("+").push_num(d.warn_more).push(" more");
+            self.text(54, 1, line.as_str(), GREY, BLACK);
+        }
+        self.name_line(66, d);
     }
 
     fn error(&mut self, d: &Detail) {

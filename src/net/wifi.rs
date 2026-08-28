@@ -14,7 +14,7 @@ use esp_idf_svc::wifi::{
     AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi, ScanMethod,
 };
 
-use crate::status::{self, Label, Net};
+use crate::status::{self, ErrorLabel, Net};
 
 pub struct Join {
     pub ssid: String,
@@ -40,13 +40,13 @@ impl Radio {
     ) -> Result<Radio, ()> {
         let wifi = EspWifi::new(modem, sysloop.clone(), Some(nvs)).map_err(|e| {
             fail(
-                Label::NoWifi,
+                ErrorLabel::NoWifi,
                 &["the WiFi driver would not initialise", &e.to_string()],
             )
         })?;
         let mut wifi = BlockingWifi::wrap(wifi, sysloop).map_err(|e| {
             fail(
-                Label::NoWifi,
+                ErrorLabel::NoWifi,
                 &["the WiFi event wrapper would not start", &e.to_string()],
             )
         })?;
@@ -71,14 +71,14 @@ impl Radio {
         wifi.set_configuration(&Configuration::Client(conf))
             .map_err(|e| {
                 fail(
-                    Label::NoWifi,
+                    ErrorLabel::NoWifi,
                     &["the WiFi configuration was rejected", &e.to_string()],
                 )
             })?;
 
         wifi.start().map_err(|e| {
             fail(
-                Label::NoWifi,
+                ErrorLabel::NoWifi,
                 &["the radio would not start", &e.to_string()],
             )
         })?;
@@ -94,7 +94,7 @@ impl Radio {
         );
         wifi.connect().map_err(|e| {
             fail(
-                Label::NoWifi,
+                ErrorLabel::NoWifi,
                 &[
                     "did not associate with the configured SSID",
                     &format!("SSID {:?}: {e}", join.ssid),
@@ -106,7 +106,7 @@ impl Radio {
         if let Some(actual) = associated_ssid() {
             if actual != join.ssid {
                 fail(
-                    Label::WrongWifi,
+                    ErrorLabel::WrongWifi,
                     &[
                         "associated with a different network than config.txt asks for",
                         &format!("asked for {:?}, joined {actual:?}", join.ssid),
@@ -119,7 +119,7 @@ impl Radio {
         wifi.ip_wait_while(|| wifi.is_up().map(|up| !up), Some(DHCP_TIMEOUT))
             .map_err(|e| {
                 fail(
-                    Label::NoIp,
+                    ErrorLabel::NoIp,
                     &[
                         "associated, but the network handed out no address",
                         &format!("no DHCP lease after {}s: {e}", DHCP_TIMEOUT.as_secs()),
@@ -129,7 +129,7 @@ impl Radio {
 
         let ip = current_ip(&wifi).ok_or_else(|| {
             fail(
-                Label::NoIp,
+                ErrorLabel::NoIp,
                 &["associated, but the interface reports no address"],
             )
         })?;
@@ -241,6 +241,6 @@ fn truncating<const N: usize>(s: &str) -> heapless::String<N> {
     out
 }
 
-fn fail(label: Label, lines: &[&str]) {
+fn fail(label: ErrorLabel, lines: &[&str]) {
     crate::errors::error(crate::errors::Target::Session, label, "net", lines);
 }
