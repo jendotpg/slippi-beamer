@@ -1,5 +1,5 @@
 //! The journal: divided into the **MSC timing ring**  and the **console log**
-//! Both rotate on boot and come back as sections of `CONFIG/debug.txt` on the
+//! Both rotate on boot and come back as sections of `LOGS/debug.txt` on the
 //! next boot. beamer_msc.c (in the hot path) writes into the ring, but does
 //! no formatting or any compute work - this is where the expensive part is
 //! done on a low priority.
@@ -610,6 +610,9 @@ fn census_text() -> &'static std::sync::Mutex<Vec<String>> {
 }
 
 pub fn count_reset(reset: u32, boots: u32) {
+    if !enabled() {
+        return;
+    }
     let guard = handle().lock().unwrap();
     let Some(nvs) = guard.as_ref() else { return };
 
@@ -726,6 +729,9 @@ static HIGHEST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0
 
 pub fn mark(phase: Phase) {
     use std::sync::atomic::Ordering::Relaxed;
+    if !enabled() {
+        return;
+    }
     if HIGHEST.fetch_max(phase as u8, Relaxed) >= phase as u8 {
         return;
     }
@@ -766,6 +772,42 @@ pub fn previous_lines() -> Vec<String> {
         Some(s) => s.lines(),
         None => Vec::new(),
     }
+}
+
+static ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn enabled() -> bool {
+    ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn disable() {
+    ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+
+    {
+        let mut tail = log_tail().lock().unwrap();
+        tail.text.clear();
+        tail.dirty = false;
+    }
+    prev_log().lock().unwrap().clear();
+    *prev().lock().unwrap() = None;
+    census_text().lock().unwrap().clear();
+
+    let guard = handle().lock().unwrap();
+    let Some(nvs) = guard.as_ref() else { return };
+    for key in [
+        KEY,
+        KEY_PREV,
+        KEY_PHASE,
+        KEY_PHASE_PREV,
+        KEY_LOG,
+        KEY_LOG_PREV,
+        KEY_RESETS,
+    ] {
+        if let Err(e) = nvs.remove(key) {
+            log::warn!("journal: could not clear '{key}': {e}");
+        }
+    }
+    log::info!("journal off: DEBUG is not set, nothing will be recorded");
 }
 
 const KEY_LOG: &str = "log";
@@ -821,6 +863,9 @@ fn rotate_log(nvs: &EspNvs<NvsCustom>) {
 }
 
 fn append_tail(tail: &mut LogTail, chunk: &str) {
+    if !enabled() {
+        return;
+    }
     tail.text.push_str(chunk);
     tail.dirty = true;
 
@@ -842,6 +887,9 @@ fn append_tail(tail: &mut LogTail, chunk: &str) {
 }
 
 fn persist_log(nvs: Option<&mut EspNvs<NvsCustom>>) {
+    if !enabled() {
+        return;
+    }
     let Some(nvs) = nvs else { return };
     let mut tail = log_tail().lock().unwrap();
     if !tail.dirty {
@@ -857,6 +905,9 @@ fn persist_log(nvs: Option<&mut EspNvs<NvsCustom>>) {
 }
 
 pub fn persist_now() {
+    if !enabled() {
+        return;
+    }
     PERSIST_NOW.store(true, std::sync::atomic::Ordering::Relaxed);
     let mut nvs = open();
     persist_log(nvs.as_mut());

@@ -62,6 +62,7 @@ pub struct Detail {
 }
 
 static STATE: AtomicU8 = AtomicU8::new(State::Booting as u8);
+static LED_GLOBAL: AtomicU8 = AtomicU8::new(crate::config::LedBrightness::DEFAULT.global());
 static DETAIL: Mutex<Option<Detail>> = Mutex::new(None);
 static GEN: AtomicU32 = AtomicU32::new(0);
 
@@ -80,6 +81,10 @@ pub fn set(state: State) {
 
 pub fn get() -> State {
     State::from_u8(STATE.load(Ordering::Relaxed))
+}
+
+pub fn set_brightness(global: u8) {
+    LED_GLOBAL.store(global, Ordering::Relaxed);
 }
 
 pub fn set_name(name: &str) {
@@ -194,7 +199,7 @@ fn render(pins: Pins) {
     };
 
     if let Some(led) = led.as_mut() {
-        led.render(State::Booting, true);
+        led.render(State::Booting, true, LED_GLOBAL.load(Ordering::Relaxed));
     }
 
     let mut panel = match lcd::Lcd::new(pins.lcd) {
@@ -220,7 +225,11 @@ fn render(pins: Pins) {
         let gen = GEN.load(Ordering::Acquire);
 
         if let Some(led) = led.as_mut() {
-            led.render(state, led_bright(state, ms));
+            led.render(
+                state,
+                led_bright(state, ms),
+                LED_GLOBAL.load(Ordering::Relaxed),
+            );
         }
 
         if let Some(lcd) = panel.as_mut() {

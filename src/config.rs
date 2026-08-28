@@ -7,8 +7,13 @@ pub const SSID_MAX_BYTES: usize = 32;
 pub const PSK_MIN: usize = 8;
 pub const PSK_MAX: usize = 63;
 pub const HOSTNAME_SLUG_MAX: usize = 56;
+pub const FILE_CAP_DEFAULT: u32 = 512;
+pub const FILE_CAP_MAX: u32 = 2048;
+pub const LED_PCT_DEFAULT: u8 = 20;
+pub const LED_PCT_MAX: u8 = 100;
+pub const DEBUG_DEFAULT: bool = false;
 
-const STRICT_HIDDEN: bool = true;
+const STRICT_FLAGS: bool = true;
 
 // --- errors ---------------------------------------------------------------
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,6 +169,90 @@ impl Default for ReplayCount {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileCap(u32);
+
+impl FileCap {
+    pub fn new(raw: &str) -> Result<Self, ConfigError> {
+        let bad = || {
+            ConfigError::new(
+                format!(
+                    "FILE-CAP must be a whole number from 1 to {FILE_CAP_MAX} (got \"{raw}\")."
+                ),
+                "Fix it in CONFIG/config.txt.",
+            )
+        };
+        if raw.is_empty() || !raw.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(bad());
+        }
+        match raw.parse::<u32>() {
+            Ok(n) if (1..=FILE_CAP_MAX).contains(&n) => Ok(FileCap(n)),
+            _ => Err(bad()),
+        }
+    }
+
+    pub fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl Default for FileCap {
+    fn default() -> Self {
+        FileCap(FILE_CAP_DEFAULT)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LedBrightness(u8);
+
+impl LedBrightness {
+    pub const DEFAULT: LedBrightness = LedBrightness(LED_PCT_DEFAULT);
+
+    pub fn new(raw: &str) -> Result<Self, ConfigError> {
+        let bad = || {
+            ConfigError::new(
+                format!(
+                    "LED-BRIGHTNESS must be a whole number from 0 to {LED_PCT_MAX} (got \"{raw}\")."
+                ),
+                "Fix it in CONFIG/config.txt. 0 turns the LED off entirely.",
+            )
+        };
+        if raw.is_empty() || !raw.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(bad());
+        }
+        match raw.parse::<u32>() {
+            Ok(n) if n <= LED_PCT_MAX as u32 => Ok(LedBrightness(n as u8)),
+            _ => Err(bad()),
+        }
+    }
+
+    pub fn get(self) -> u8 {
+        self.0
+    }
+
+    pub const fn is_off(self) -> bool {
+        self.0 == 0
+    }
+
+    pub const fn global(self) -> u8 {
+        if self.is_off() {
+            return 0;
+        }
+        let scaled = (self.0 as u32 * 31 + 50) / 100;
+        if scaled == 0 {
+            1
+        } else {
+            scaled as u8
+        }
+    }
+}
+
+impl Default for LedBrightness {
+    fn default() -> Self {
+        LedBrightness::DEFAULT
+    }
+}
+
 // --- the config -----------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +272,9 @@ pub struct Config {
     network: Network,
     station_name: Option<StationName>,
     num_replays: ReplayCount,
+    file_cap: FileCap,
+    led_brightness: LedBrightness,
+    debug: bool,
 }
 
 impl Config {
@@ -196,6 +288,18 @@ impl Config {
 
     pub fn num_replays(&self) -> u8 {
         self.num_replays.get()
+    }
+
+    pub fn file_cap(&self) -> u32 {
+        self.file_cap.get()
+    }
+
+    pub fn led_brightness(&self) -> LedBrightness {
+        self.led_brightness
+    }
+
+    pub fn debug(&self) -> bool {
+        self.debug
     }
 
     pub fn display_name<'a>(&'a self, station_id: &'a str) -> &'a str {
@@ -238,6 +342,28 @@ impl Config {
             },
         };
 
+        let file_cap = match raw.file_cap.as_deref() {
+            None | Some("") => FileCap::default(),
+            Some(s) => match FileCap::new(s) {
+                Ok(v) => v,
+                Err(e) => {
+                    errors.push(e);
+                    FileCap::default()
+                }
+            },
+        };
+
+        let led_brightness = match raw.led_brightness.as_deref() {
+            None | Some("") => LedBrightness::default(),
+            Some(s) => match LedBrightness::new(s) {
+                Ok(v) => v,
+                Err(e) => {
+                    errors.push(e);
+                    LedBrightness::default()
+                }
+            },
+        };
+
         let ssid = match raw.ssid.as_deref() {
             None | Some("") => None,
             Some(s) => match Ssid::new(s) {
@@ -264,11 +390,19 @@ impl Config {
             }
         }
 
-        let hidden = match parse_hidden(raw.hidden.as_deref()) {
+        let hidden = match parse_flag("HIDDEN", raw.hidden.as_deref()) {
             Ok(v) => v,
             Err(e) => {
                 errors.push(e);
                 false
+            }
+        };
+
+        let debug = match parse_flag("DEBUG", raw.debug.as_deref()) {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(e);
+                DEBUG_DEFAULT
             }
         };
 
@@ -290,6 +424,9 @@ impl Config {
             network,
             station_name,
             num_replays,
+            file_cap,
+            led_brightness,
+            debug,
         })
     }
 }
@@ -335,6 +472,9 @@ struct Raw {
     hidden: Option<String>,
     station_name: Option<String>,
     num_replays: Option<String>,
+    file_cap: Option<String>,
+    led_brightness: Option<String>,
+    debug: Option<String>,
 }
 
 impl Raw {
@@ -360,6 +500,9 @@ impl Raw {
                 "HIDDEN" => raw.hidden = Some(value),
                 "STATION-NAME" | "STATION_NAME" => raw.station_name = Some(value),
                 "NUM-REPLAYS-SERVED" | "NUM_REPLAYS_SERVED" => raw.num_replays = Some(value),
+                "FILE-CAP" | "FILE_CAP" => raw.file_cap = Some(value),
+                "LED-BRIGHTNESS" | "LED_BRIGHTNESS" => raw.led_brightness = Some(value),
+                "DEBUG" => raw.debug = Some(value),
                 _ => {}
             }
         }
@@ -380,13 +523,13 @@ fn unquote(s: &str) -> &str {
     }
 }
 
-fn parse_hidden(raw: Option<&str>) -> Result<bool, ConfigError> {
+fn parse_flag(key: &str, raw: Option<&str>) -> Result<bool, ConfigError> {
     let Some(v) = raw else { return Ok(false) };
     match v.to_ascii_lowercase().as_str() {
         "true" | "yes" | "1" => Ok(true),
         "false" | "no" | "0" | "" => Ok(false),
-        _ if STRICT_HIDDEN => Err(ConfigError::new(
-            format!("HIDDEN must be true or false (got \"{v}\")."),
+        _ if STRICT_FLAGS => Err(ConfigError::new(
+            format!("{key} must be true or false (got \"{v}\")."),
             "Fix it in CONFIG/config.txt.",
         )),
         _ => Ok(false),

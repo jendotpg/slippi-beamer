@@ -3,7 +3,7 @@
 //! bind get [`Target::Late`] and are put in NVS.
 //!
 //! During the boot process, init() below rotates the previous sessions Late
-//! errors off of NVS and onto the disk at CONFIG/error.txt
+//! errors off of NVS and onto the disk at LOGS/error.txt
 use std::sync::{Mutex, MutexGuard};
 
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
@@ -176,7 +176,7 @@ fn have_errors(s: &Store) -> bool {
 
 pub fn mirror(base: &str, station_id: &str) {
     let s = store();
-    let path = format!("{base}/CONFIG/error.txt");
+    let path = format!("{base}/LOGS/error.txt");
 
     if !have_errors(&s) {
         if std::path::Path::new(&path).exists() {
@@ -201,7 +201,7 @@ pub fn mirror(base: &str, station_id: &str) {
     if let Err(e) = std::fs::write(&path, crlf.as_bytes()) {
         log::warn!("could not write error.txt: {e}");
     } else {
-        log::info!("wrote CONFIG/error.txt");
+        log::info!("wrote LOGS/error.txt");
     }
 }
 

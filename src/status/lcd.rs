@@ -16,6 +16,7 @@ const X_GAP: u16 = 1;
 const Y_GAP: u16 = 26;
 const MADCTL: u8 = 0x60;
 const BACKLIGHT_ACTIVE_LOW: bool = true;
+const PCLK_HZ: u32 = 10_000_000; // deliberately slow - we barely animate...
 
 const SWRESET: u8 = 0x01;
 const SLPOUT: u8 = 0x11;
@@ -468,7 +469,7 @@ impl<'d> Lcd<'d> {
             line.push("+").push_num(d.more).push(" more");
             self.text(54, 1, line.as_str(), GREY, BLACK);
         }
-        self.text(66, 1, "see CONFIG/error.txt", GREY, BLACK);
+        self.text(66, 1, "see LOGS/error.txt", GREY, BLACK);
     }
 
     pub fn spinner(&mut self, frame: u64) {

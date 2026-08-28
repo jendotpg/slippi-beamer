@@ -9,7 +9,7 @@
 //!     list runs as soon as a game is admitted,
 //!     list runs every [`LIST_EVERY`] only if no game is live
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -25,8 +25,7 @@ use crate::storage::{msc, SdCard};
 
 const TICK: Duration = Duration::from_secs(1);
 const LIST_EVERY: Duration = Duration::from_secs(10);
-const FILE_CAP: u32 = 2000; // this is just for display - there can be more
-                            // they just wont be reported
+static FILE_CAP: AtomicU32 = AtomicU32::new(crate::config::FILE_CAP_DEFAULT);
 const MAX_NEW: usize = 8;
 static GAME_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -79,7 +78,8 @@ pub fn refresh() {
 
 static TRACKER: Mutex<Option<Tracker>> = Mutex::new(None);
 
-pub fn spawn(sd: Arc<SdCard>, station: String, cap: usize) -> anyhow::Result<()> {
+pub fn spawn(sd: Arc<SdCard>, station: String, cap: usize, file_cap: u32) -> anyhow::Result<()> {
+    FILE_CAP.store(file_cap, Ordering::Relaxed);
     *lock(&SET) = Some(PublishedSet::new(station, cap));
     *lock(&TRACKER) = Some(Tracker::with_card(sd));
     status::set_replays(0);
@@ -228,7 +228,7 @@ impl Tracker {
         let mut hashes: Vec<u32> = Vec::new();
         let mut fresh: Vec<String> = Vec::new();
         let known = &self.seen;
-        let walk = window.for_each_replay(FILE_CAP, |name| {
+        let walk = window.for_each_replay(FILE_CAP.load(Ordering::Relaxed), |name| {
             let h = hash(name);
             hashes.push(h);
             if known.binary_search(&h).is_err() && fresh.len() < MAX_NEW {

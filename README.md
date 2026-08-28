@@ -7,21 +7,16 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 Major TODOs still:
 
 1. document all rtos task priorities
-2. config changes:
-   1. make debug optional. if debug is on, dont delete the last debug.txt at boot - i dont mind growing indefinitely on a default-off flag!
-   2. led brightness (as percent)
-   3. file cap (currently 2000 - thats probably too high )
-   4. split CONFIG/ and STATUS/ directories (read from CONFIG and write to STATUS) (consider a better name for STATUS)
+2. do a liveness check as soon as writes start
+   1. and turn off the 10s liveness check! why bother?
 
-3. error handling
-   1. `Late` in error handling is poorly named - its pretty confusing. update it: post-bind? something like? and session is pre-bind?
-   2. write `CONFIG/error.txt` on error! we dont do that at all!
+3. WARNING handling: still healthy, but something is weird. green LED but it blinks
+   1. warning if 75% of file cap is reached! (also, show num files and file cap on idle screen instead of served replay count)
+   2. warning if 100% of the file cap is reached!
+   3. update the `READ_GRACE` expiry (`NO USB`) - plugging into just a power source should bring up wifi, so ERROR is wrong! show a warning if theres no host mounting us
+   4. mtools going is a warning...
 
-4. WARNING handling: still healthy, but something is weird. green LED but it blinks
-   1. warning if 90% of file cap is reached! (also, show num files and file cap on main screen instead of served replay count)
-   2. update the `READ_GRACE` expiry (`NO USB`) - plugging into just a power source should bring up wifi, so ERROR is wrong! show a warning if theres no host mounting us
-   3. mtools going
-
+4. auto-delete files during prebind window (configurable with a debug knob)
 5. stop serving on eject -> shutdown
 6. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
 7. Fleet testing. Multiple stations, mDNS name collisions, AP contention.
@@ -46,8 +41,9 @@ Major TODOs still:
 | `HIDDEN`             | `false`        | Whether the network broadcasts its name.                                                                                                                   |
 | `STATION-NAME`       | the station ID | What to call this station. Appears as`station_name` in `GET /status`, and as the station's hostname (slugged - see [Station Identity](#station-identity)). |
 | `NUM-REPLAYS-SERVED` | `10`           | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                   |
-
-If there are any issues, they'll be recorded in `CONFIG/error.txt`.
+| `FILE-CAP`           | `512`          | How many replays the station counts on the card before it stops counting. 1 to 2048.                                                                       |
+| `LED-BRIGHTNESS`     | `20`           | The status LED, 0 to 100 percent.                                                                                                                          |
+| `DEBUG`              | `false`        | Whether to keep a`LOGS/debug.txt` of each boot. Off means the journal records nothing at all. These files are never deleted automatically.                 |
 
 ## Status Readout
 
@@ -74,7 +70,7 @@ Download `beamer.bin` from the [latest release](<sorry, this>) (TODO: this. sorr
 
 Then per station:
 
-1. Insert a microSD card, formatted as (FAT32) with a first partition of 16 GB or smaller. The first boot derives the station identity and lays down `CONFIG/`. A card that is exFAT, unpartitioned, or partitioned larger than 16 GiB shows `WRONG FORMAT` on the screen — see [Card size](#card-size).
+1. Insert a microSD card, formatted as (FAT32) with a first partition of 16 GB or smaller. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`. A card that is exFAT, unpartitioned, or partitioned larger than 16 GiB shows `WRONG FORMAT` on the screen — see [Card size](#card-size).
 2. Put the dongle into download mode and flash it. Hold the button on the side of the board down while you plug it into your laptop, then let go. Flash the firmware onto it:
 
    ```bash
@@ -88,7 +84,7 @@ Then per station:
 
 4. Eject the Beamer and wait until the light and screen go dark.
 5. Plug the Beamer into a Wii and watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go!
-   1. If it instead shows an error label in large text — and the LED starts blinking fast — that label is your diagnosis. [Error labels](#error-labels) says what each one means. The screen gives you one line of detail; for the full text, unplug the Beamer from the Wii, bring it back to your laptop, and read `CONFIG/error.txt`.
+   1. If it instead shows an error label in large text — and the LED starts blinking fast — that label is your diagnosis. [Error labels](#error-labels) says what each one means. The screen gives you one line of detail; for the full text, unplug the Beamer from the Wii, bring it back to your laptop, and read `LOGS/error.txt`.
    2. Note that `error.txt` is from the LAST session! If you update and replug directly into the laptop without trying on a Wii in between, watch the screen instead — there will still be an `error.txt` and it will be describing the previous boot, not the current one!
 
 ## Hardware
@@ -267,41 +263,41 @@ Everything else — serving replays over HTTP, counting files, peeking at the ga
 
 ### Boot phases
 
-| Phase                      | What                                                                                                                                                                                                  |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ClaimIdentity`            | eFuse base MAC becomes a UUIDv5. Refuse to boot on an all-zero MAC. Spawn the status task, so the LED lights at once.                                                                                 |
-| `MountCard`                | `sdmmc_host_init`, 4-bit bus, probe the card.                                                                                                                                                         |
-| `PrepareForBind`           | **The write window.** Mount FatFs read-write, read `CONFIG/config.txt`, rotate the error state, mirror `CONFIG/error.txt`, write `CONFIG/debug.txt`, seed a template `config.txt` if absent, unmount. |
-| `BindCard`                 | Present the card to the host as a USB drive.                                                                                                                                                          |
-| `StartJournal`             | The journal drain, the read window, the scan tick.                                                                                                                                                    |
-| `EstablishNetworkServices` | WiFi,`esp_http_server`, mDNS `_beamer._tcp` on 80.                                                                                                                                                    |
-| `Running`                  | The verdict loop. The boot is over.                                                                                                                                                                   |
+| Phase                      | What                                                                                                                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ClaimIdentity`            | eFuse base MAC becomes a UUIDv5. Refuse to boot on an all-zero MAC. Spawn the status task, so the LED lights at once.                                                                                               |
+| `MountCard`                | `sdmmc_host_init`, 4-bit bus, probe the card.                                                                                                                                                                       |
+| `PrepareForBind`           | **The write window.** Mount FatFs read-write, read `CONFIG/config.txt`, rotate the error state, mirror `LOGS/error.txt`, write `LOGS/debug.txt` if `DEBUG` is set, seed a template `config.txt` if absent, unmount. |
+| `BindCard`                 | Present the card to the host as a USB drive.                                                                                                                                                                        |
+| `StartJournal`             | The journal drain, the read window, the scan tick.                                                                                                                                                                  |
+| `EstablishNetworkServices` | WiFi,`esp_http_server`, mDNS `_beamer._tcp` on 80.                                                                                                                                                                  |
+| `Running`                  | The verdict loop. The boot is over.                                                                                                                                                                                 |
 
 ### Memory
 
-The main memory constraint is the largest free block, not the number of free bytes. Both numbers are logged, at boot, when the network comes up, in every periodic journal summary, and beside any mount failure. They arrive as `heap: N B free, largest block M B` in `CONFIG/debug.txt`. A healthy station settles around 60 KB free, and the gap between the two figures is the fragmentation. The journal summary also carries the smallest that the largest free block ever got:`low water K B.`
+The main memory constraint is the largest free block, not the number of free bytes. Both numbers are logged, at boot, when the network comes up, in every periodic journal summary, and beside any mount failure. They arrive as `heap: N B free, largest block M B` in `LOGS/debug.txt`, when `DEBUG` is set. A healthy station settles around 60 KB free, and the gap between the two figures is the fragmentation. The journal summary also carries the smallest that the largest free block ever got:`low water K B.`
 
 #### Allocated statically at link time
 
-| Consumer                   |      Bytes |                                                            |
-| -------------------------- | ---------: | ---------------------------------------------------------- |
-| `beamer_wbc.c` `s_data`    |     32,768 | the write-back cache: 64 sectors of 512 B                  |
-| `beamer_wbc.c` `s_staging` |      8,192 | one flush run, DMA'd straight out of`.bss`                 |
-| `beamer_msc.c` `s_ring`    |      8,192 | 512 transfer timings, the CBW→CSW census                   |
-| `beamer_log.c` `s_ring`    |      8,192 | the`esp_log` capture that becomes `CONFIG/debug.txt`       |
-| `lcd.rs` `SCRATCH`         |      7,680 | one 160×24 band of the panel, so rendering never allocates |
-| `http.rs` `SEND_BUF`       |      8,192 | the replay read chunk — see below                          |
-| TinyUSB`_mscd_epbuf`       |      4,096 | `CFG_TUD_MSC_EP_BUFSIZE`                                   |
-| `beamer_wbc.c` `s_meta`    |        768 | 64 slot descriptors                                        |
-| everything else            |     ~2,000 | descriptors, fonts, the Shift-JIS table, scalars           |
-| **Total**                  | **~80 KB** |                                                            |
+| Consumer                   |      Bytes |                                                                                                   |
+| -------------------------- | ---------: | ------------------------------------------------------------------------------------------------- |
+| `beamer_wbc.c` `s_data`    |     32,768 | the write-back cache: 64 sectors of 512 B                                                         |
+| `beamer_wbc.c` `s_staging` |      8,192 | one flush run, DMA'd straight out of`.bss`                                                        |
+| `beamer_msc.c` `s_ring`    |      8,192 | 512 transfer timings, the CBW→CSW census                                                          |
+| `beamer_log.c` `s_ring`    |      8,192 | the`esp_log` capture that becomes `LOGS/debug.txt`. Static - `DEBUG=false` does not give it back. |
+| `lcd.rs` `SCRATCH`         |      7,680 | one 160×24 band of the panel, so rendering never allocates                                        |
+| `http.rs` `SEND_BUF`       |      8,192 | the replay read chunk — see below                                                                 |
+| TinyUSB`_mscd_epbuf`       |      4,096 | `CFG_TUD_MSC_EP_BUFSIZE`                                                                          |
+| `beamer_wbc.c` `s_meta`    |        768 | 64 slot descriptors                                                                               |
+| everything else            |     ~2,000 | descriptors, fonts, the Shift-JIS table, scalars                                                  |
+| **Total**                  | **~80 KB** |                                                                                                   |
 
 #### Allocated once at boot
 
 | Consumer                                                                                                                                                                            |   Bytes |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------: |
 | ESP-IDF's own tasks (main 8,704, TCP/IP 3,584, esp_timer 4,096, event 2,816, IPC ×2 2,560, idle ×2 3,072, FreeRTOS timer 2,048, WiFi ~3,584, mDNS 4,096, httpd 8,192) plus ~13 TCBs | ~53,000 |
-| Firmware tasks: journal log 4,096, journal drain 8,192, scan 8,192, net 8,192, health 6,144, status 4,096                                                                           |  38,912 |
+| Firmware tasks: journal log 4,096, scan 8,192, net 8,192, health 6,144, status 4,096. The journal drain's 8,192 joins them only when`DEBUG` is set                                  |  30,720 |
 | C tasks:`beamer_msc` 6,144, `beamer_wbc` 4,096, plus TCBs and six semaphores                                                                                                        | ~12,400 |
 | WiFi pinned RX buffers, 10 × ~1,600                                                                                                                                                 | ~16,000 |
 | WiFi RX management buffers, 5 × ~500                                                                                                                                                |  ~2,500 |
@@ -325,18 +321,18 @@ The main memory constraint is the largest free block, not the number of free byt
 
 ##### Hard limits
 
-|                         | Limit             | Set by                                                                                                                                              |
-| ----------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FatFs volumes           | 2                 | `CONFIG_FATFS_VOLUME_COUNT` — one is held for the boot by the read window                                                                           |
-| FatFs sector size       | 512 B             | `CONFIG_WL_SECTOR_SIZE_512`; it sizes `FATFS.win[]` and every `FIL.buf[]`, and at 4096 the mount context is 21 KB instead of 2.2 KB                 |
-| Open files per mount    | 2                 | `MAX_FILES` in `storage/fat.rs`                                                                                                                     |
-| Concurrent HTTP sockets | 4                 | `esp_http_server`, 192 B of state each                                                                                                              |
-| Write-back cache        | 64 sectors        | `WBC_SECTORS`; `high water` and `stalls` in `CONFIG/debug.txt` say whether it is enough                                                             |
-| Replays served          | 16                | `NUM-REPLAYS-SERVED` ceiling                                                                                                                        |
-| Replays counted         | 2,000             | `slippi_files` saturates, `slippi_files_capped` goes true                                                                                           |
-| Error text kept         | 2,048 B per store | then truncated                                                                                                                                      |
-| Captured log kept       | 4,096 B           | oldest lines dropped                                                                                                                                |
-| Journal partition       | 64 KB             | `jrnl`, separate from `nvs` so diagnostics cannot exhaust a station's durable state; the reset census adds one 37-byte key, rewritten once per boot |
+|                         | Limit                                  | Set by                                                                                                                                              |
+| ----------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FatFs volumes           | 2                                      | `CONFIG_FATFS_VOLUME_COUNT` — one is held for the boot by the read window                                                                           |
+| FatFs sector size       | 512 B                                  | `CONFIG_WL_SECTOR_SIZE_512`; it sizes `FATFS.win[]` and every `FIL.buf[]`, and at 4096 the mount context is 21 KB instead of 2.2 KB                 |
+| Open files per mount    | 2                                      | `MAX_FILES` in `storage/fat.rs`                                                                                                                     |
+| Concurrent HTTP sockets | 4                                      | `esp_http_server`, 192 B of state each                                                                                                              |
+| Write-back cache        | 64 sectors                             | `WBC_SECTORS`; `high water` and `stalls` in `LOGS/debug.txt` say whether it is enough                                                               |
+| Replays served          | 16                                     | `NUM-REPLAYS-SERVED` ceiling                                                                                                                        |
+| Replays counted         | `FILE-CAP`, default 512, ceiling 2,048 | `slippi_files` saturates, `slippi_files_capped` goes true                                                                                           |
+| Error text kept         | 2,048 B per store                      | then truncated                                                                                                                                      |
+| Captured log kept       | 4,096 B                                | oldest lines dropped                                                                                                                                |
+| Journal partition       | 64 KB                                  | `jrnl`, separate from `nvs` so diagnostics cannot exhaust a station's durable state; the reset census adds one 37-byte key, rewritten once per boot |
 
 ### Releasing
 

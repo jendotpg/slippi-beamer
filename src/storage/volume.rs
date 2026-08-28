@@ -1,10 +1,47 @@
 use crate::journal;
 use crate::storage::fat::WriteWindow;
 
-const PATH: &str = "CONFIG/debug.txt";
+const DIR: &str = "LOGS";
+const STEM: &str = "debug";
+
+fn next_name(dir: &str) -> String {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            log::warn!("could not list {DIR}/, overwriting {STEM}.txt: {e}");
+            return format!("{STEM}.txt");
+        }
+    };
+
+    let prefix = format!("{STEM}_");
+    let mut highest = 0u32;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(rest) = name.strip_suffix(".txt") else {
+            continue;
+        };
+        let n = if rest == STEM {
+            1
+        } else {
+            match rest.strip_prefix(&prefix).map(str::parse::<u32>) {
+                Some(Ok(n)) => n,
+                _ => continue,
+            }
+        };
+        highest = highest.max(n);
+    }
+
+    match highest {
+        0 => format!("{STEM}.txt"),
+        n => format!("{STEM}_{}.txt", n + 1),
+    }
+}
 
 pub fn write_debug(base: &str, _window: &WriteWindow, station_id: &str, reset: &str) {
-    let path = format!("{base}/{PATH}");
+    let dir = format!("{base}/{DIR}");
+    let name = next_name(&dir);
+    let path = format!("{dir}/{name}");
 
     let mut body = String::with_capacity(1024);
     body.push_str("Beamer debug\n");
@@ -59,8 +96,8 @@ pub fn write_debug(base: &str, _window: &WriteWindow, station_id: &str, reset: &
 
     let crlf = body.replace('\n', "\r\n"); // windows love <3
     match std::fs::write(&path, crlf.as_bytes()) {
-        Ok(()) => log::info!("wrote {PATH}"),
-        Err(e) => log::warn!("could not write {PATH}: {e}"),
+        Ok(()) => log::info!("wrote {DIR}/{name}"),
+        Err(e) => log::warn!("could not write {DIR}/{name}: {e}"),
     }
 }
 

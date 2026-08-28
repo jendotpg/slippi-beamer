@@ -1,7 +1,7 @@
 /*
  * esp_log redirected into a journal for later read-back. Lines land in a RAM
  * ring, a priority-1 task in journal.rs drains them, and they reach a human
- * as the `[previous boot log]` section of CONFIG/debug.txt on reboot
+ * as the `[previous boot log]` section of LOGS/debug.txt on reboot
  *
  * HOOK MUST NOT BLOCK.
  */

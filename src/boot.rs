@@ -100,6 +100,12 @@ pub fn run() -> anyhow::Result<()> {
     journal::mark(Phase::PrepareForBind);
     let outcome = write_window(&sd, &id);
 
+    let settings = Settings::from(&outcome);
+    status::set_brightness(settings.led_global);
+    if !settings.debug {
+        journal::disable();
+    }
+
     // --- BindCard --------------------------------------------------------
     journal::mark(Phase::BindCard);
 
@@ -119,17 +125,20 @@ pub fn run() -> anyhow::Result<()> {
 
     // --- StartJournal ----------------------------------------------------
     journal::mark(Phase::StartJournal);
-    journal::spawn()?;
+    if settings.debug {
+        journal::spawn()?;
+    }
 
     if let Err(e) = storage::fat::register_read_window(&sd) {
         log::error!("the read window would not register: {e}");
     }
 
-    let cap = match &outcome {
-        Outcome::Applied(cfg) => cfg.num_replays(),
-        Outcome::Rejected(_) | Outcome::Unreadable(_) => crate::config::KEEP_DEFAULT,
-    };
-    if let Err(e) = scan::spawn(sd.clone(), id.to_string(), cap as usize) {
+    if let Err(e) = scan::spawn(
+        sd.clone(),
+        id.to_string(),
+        settings.num_replays as usize,
+        settings.file_cap,
+    ) {
         log::error!("the scan task would not start: {e}");
     }
 
@@ -253,6 +262,33 @@ pub fn run() -> anyhow::Result<()> {
         }
 
         std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+struct Settings {
+    num_replays: u8,
+    file_cap: u32,
+    led_global: u8,
+    debug: bool,
+}
+
+impl Settings {
+    fn from(outcome: &Outcome) -> Settings {
+        use crate::config;
+        match outcome {
+            Outcome::Applied(cfg) => Settings {
+                num_replays: cfg.num_replays(),
+                file_cap: cfg.file_cap(),
+                led_global: cfg.led_brightness().global(),
+                debug: cfg.debug(),
+            },
+            Outcome::Rejected(_) | Outcome::Unreadable(_) => Settings {
+                num_replays: config::KEEP_DEFAULT,
+                file_cap: config::FILE_CAP_DEFAULT,
+                led_global: config::LedBrightness::default().global(),
+                debug: config::DEBUG_DEFAULT,
+            },
+        }
     }
 }
 
@@ -470,6 +506,12 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
                 cfg.num_replays(),
                 cfg.hostname(&station_id),
             );
+            log::info!(
+                "config: file cap {}, LED {}%, debug {}",
+                cfg.file_cap(),
+                cfg.led_brightness().get(),
+                cfg.debug(),
+            );
             status::set_name(cfg.display_name(&station_id));
         }
         Outcome::Rejected(problems) => {
@@ -499,7 +541,9 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
     log::info!("mirroring error.txt");
     errors::mirror(BASE_PATH, &station_id);
 
-    volume::write_debug(BASE_PATH, &window, &station_id, reset_reason());
+    if Settings::from(&outcome).debug {
+        volume::write_debug(BASE_PATH, &window, &station_id, reset_reason());
+    }
 
     drop(window);
     log::info!("write window closed");
@@ -508,7 +552,7 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
 }
 
 fn seed_volume() {
-    for dir in ["CONFIG", "SLIPPI", ".fseventsd"] {
+    for dir in ["CONFIG", "LOGS", "SLIPPI", ".fseventsd"] {
         let path = format!("{BASE_PATH}/{dir}");
         if !std::path::Path::new(&path).exists() {
             if let Err(e) = std::fs::create_dir(&path) {
@@ -544,7 +588,7 @@ const CONFIG_TEMPLATE: &str = "\
 # The Beamer reads this file at every boot.
 #
 # Until SSID is filled in, this station has no network. That is expected.
-# After a reboot, if CONFIG/error.txt exists it says what went wrong. The
+# After a reboot, if LOGS/error.txt exists it says what went wrong. The
 # station's live state is the LED, the screen, and http://<station>/status.
 #
 # SSID / PASSWORD    the network to join. Leave PASSWORD blank for an open
@@ -555,6 +599,12 @@ const CONFIG_TEMPLATE: &str = "\
 #                    network. Blank means use the station's ID.
 # NUM-REPLAYS-SERVED how many of the newest replays this station hands out over
 #                    HTTP. 1 to 16.
+# FILE-CAP           how many replays this station counts on the card before it
+#                    stops counting. 1 to 2048.
+# LED-BRIGHTNESS     0 to 100 percent. 0 turns the status LED off completely -
+#                    the screen then becomes the only readout.
+# DEBUG              true or false - whether to keep a LOGS/debug.txt of each
+#                    boot. Off by default. These files are never deleted.
 
 SSID=
 PASSWORD=
@@ -562,4 +612,7 @@ COUNTRY=US
 HIDDEN=false
 STATION-NAME=
 NUM-REPLAYS-SERVED=10
+FILE-CAP=512
+LED-BRIGHTNESS=20
+DEBUG=false
 ";
