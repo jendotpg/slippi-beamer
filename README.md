@@ -6,17 +6,16 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 Major TODOs still:
 
-1. document all rtos task priorities
-2. auto-delete files during prebind window (configurable with a debug knob)
-3. stop serving on eject -> shutdown
-4. provide a way to update config files OTA
-5. audit /status json
-6. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
-7. Fleet testing. Multiple stations, mDNS name collisions, AP contention.
-8. support other boards with different pinouts! different build options, maybe?
+1. provide button-based way to delete files (three clicks, confirm with a hold? something like?)
+2. stop serving on eject -> shutdown
+3. provide a way to update config files OTA
+4. audit /status json
+5. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
+6. Fleet testing. Multiple stations, mDNS name collisions, AP contention.
+7. support other boards with different pinouts! different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-9. colorblind mode? amber > blue, perhaps?
+8. colorblind mode? amber > blue, perhaps?
 
 ## Configuring a station
 
@@ -383,18 +382,22 @@ While a sector is dirty, the host believes a write landed that has not, and pull
 
 Errors quiesce the cache before the LED turns red by switching to write-through - that way an Error'd beamer can be safely pulled from a Wii.
 
-#### Tasks and cores
+#### FreeRTOS tasks
 
-| Core | Task                                           | Priority        |
-| ---- | ---------------------------------------------- | --------------- |
-| 1    | TinyUSB device task and SDMMC transfers        | 22              |
-| 1    | write-back cache flush                         | 10              |
-| 1    | timing-ring drain (the USB/SD instrumentation) | 1               |
-| 1    | `esp_log` capture drain, and the UART write    | 1               |
-| 0    | WiFi and lwIP                                  | ESP-IDF default |
-| 0    | HTTP server                                    | 5               |
-| 0    | scan tick / health tick                        | 4 / 2           |
-| 0    | status (LED + screen)                          | 3               |
+Keyed by the task's real name, because that is what a panic backtrace, a coredump listing and `uxTaskGetSystemState` print — not the prose label.
+
+| Task                                                                               | Priority               | Core | Created at                               |
+| ---------------------------------------------------------------------------------- | ---------------------- | ---- | ---------------------------------------- |
+| `beamer_msc` — the TinyUSB device loop, and the SCSI callbacks that reach the card | 22                     | 1    | `components/beamer_msc/beamer_msc.c:628` |
+| `beamer_wbc` — the write-back cache flush                                          | 10                     | 1    | `components/beamer_msc/beamer_wbc.c:235` |
+| `httpd` — `esp_http_server`. ESP-IDF creates it; the firmware only configures it   | 5                      | 0    | `src/net/http.rs:28`                     |
+| `net` — WiFi association, then HTTP and mDNS bring-up                              | 4                      | 0    | `src/net/mod.rs:120`                     |
+| `scan` — the 10 s tick                                                             | 4                      | 0    | `src/scan.rs:89`                         |
+| `status` — the LED and the panel                                                   | 3                      | 0    | `src/status/mod.rs:182`                  |
+| `health` — the network health tick                                                 | 2                      | 0    | `src/net/check.rs:35`                    |
+| `journal` — journal, when in debug mode                                            | 1                      | 1    | `src/journal.rs:1037`                    |
+| `jrnl-log` — the `esp_log` capture drain, and the UART write                       | 1                      | 1    | `src/journal.rs:980`                     |
+| `main` — runs `boot::run` and returns                                              | 1, the ESP-IDF default | 0    | `CONFIG_ESP_MAIN_TASK_AFFINITY_CPU0`     |
 
 #### Station Identity
 
