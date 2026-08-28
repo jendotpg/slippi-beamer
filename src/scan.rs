@@ -7,7 +7,8 @@
 //! In short:
 //!     peek runs every [`TICK`]
 //!     list runs as soon as a game is admitted,
-//!     list runs every [`LIST_EVERY`] only if no game is live
+//!     list runs on the next tick after a host write, if no game is live
+//!     list runs every [`LIST_BACKSTOP_TICKS`] as a backstop -- writes reset it
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -25,7 +26,6 @@ use crate::storage::{msc, SdCard};
 use crate::warnings::{self, WarningLabel};
 
 const TICK: Duration = Duration::from_secs(1);
-const LIST_EVERY: Duration = Duration::from_secs(10);
 static FILE_CAP: AtomicU32 = AtomicU32::new(crate::config::FILE_CAP_DEFAULT);
 const MAX_NEW: usize = 8;
 static GAME_LIVE: AtomicBool = AtomicBool::new(false);
@@ -102,28 +102,26 @@ pub fn spawn(sd: Arc<SdCard>, station: String, cap: usize, file_cap: u32) -> any
 }
 
 fn run() {
-    let mut since_list = LIST_EVERY;
     loop {
         std::thread::sleep(TICK);
 
         let mut guard = lock(&TRACKER);
         let Some(t) = guard.as_mut() else { continue };
 
+        if msc::take_dirty() {
+            t.pending_peek = true;
+            t.pending_list = true;
+            t.ticks_since_list = 0;
+        }
+        t.ticks_since_list = t.ticks_since_list.saturating_add(1);
+
         if t.live.is_some() {
-            if msc::take_dirty() {
-                t.pending_peek = true;
-            }
             t.ticks_since_peek = t.ticks_since_peek.saturating_add(1);
             if t.pending_peek || t.ticks_since_peek >= PEEK_BACKSTOP_TICKS {
                 t.peek_tracked();
             }
-            since_list = Duration::ZERO;
-        } else {
-            since_list += TICK;
-            if since_list >= LIST_EVERY {
-                since_list = Duration::ZERO;
-                t.list();
-            }
+        } else if t.pending_list || t.ticks_since_list >= LIST_BACKSTOP_TICKS {
+            t.list();
         }
     }
 }
@@ -135,11 +133,14 @@ struct Tracker {
     live: Option<String>,
     pending_peek: bool,
     ticks_since_peek: u32,
+    pending_list: bool,
+    ticks_since_list: u32,
     mount_fails: u32,
 }
 
 const MOUNT_FAILS_BEFORE_ERROR: u32 = 5;
 const PEEK_BACKSTOP_TICKS: u32 = 10;
+const LIST_BACKSTOP_TICKS: u32 = 60;
 
 impl Tracker {
     fn new() -> Tracker {
@@ -150,6 +151,8 @@ impl Tracker {
             live: None,
             pending_peek: false,
             ticks_since_peek: 0,
+            pending_list: true, // the baseline listing, on the first tick
+            ticks_since_list: 0,
             mount_fails: 0,
         }
     }
@@ -255,6 +258,8 @@ impl Tracker {
         };
 
         self.mount_fails = 0;
+        self.pending_list = false;
+        self.ticks_since_list = 0;
 
         hashes.sort_unstable();
         let first = !self.has_baseline;

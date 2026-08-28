@@ -7,29 +7,16 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 Major TODOs still:
 
 1. document all rtos task priorities
-2. do a liveness check as soon as writes start
-   1. and turn off the 10s liveness check! why bother?
+2. auto-delete files during prebind window (configurable with a debug knob)
+3. stop serving on eject -> shutdown
+4. provide a way to update config files OTA
+5. audit /status json
+6. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
+7. Fleet testing. Multiple stations, mDNS name collisions, AP contention.
+8. support other boards with different pinouts! different build options, maybe?
+   1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-3. WARNING handling: still healthy, but something is weird. green LED but it blinks
-   1. warning if 75% of file cap is reached! (also, show num files and file cap on idle screen instead of served replay count)
-   2. warning if 100% of the file cap is reached!
-   3. update the `READ_GRACE` expiry (`NO USB`) - plugging into just a power source should bring up wifi, so ERROR is wrong! show a warning if theres no host mounting us
-   4. mtools going is a warning...
-
-4. auto-delete files during prebind window (configurable with a debug knob)
-5. stop serving on eject -> shutdown
-6. provide a way to update config files OTA
-7. audit /status json
-8. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
-9. Fleet testing. Multiple stations, mDNS name collisions, AP contention.
-10. support other boards with different pinouts! different build options, maybe?
-    1. order and test Waveshare ESP32-S3-LCD-1.47 version
-
-11. colorblind mode? amber > blue, perhaps, meaning
-12. screen prettiness
-    1. transferring progress bar and`Content-Length` on replay responses
-    2. show how much drive space is empty on idle screen!
-    3. ip shown better?
+9. colorblind mode? amber > blue, perhaps?
 
 ## Configuring a station
 
@@ -127,7 +114,7 @@ Every station advertises `_beamer._tcp` on port 80 over mDNS, and the instance n
 
 ### `GET /status`
 
-Whatever the last check found. `generated` is how you tell how old that is. The gadget and game fields are refreshed every 10 s by `status-check`, so they are never more than a tick behind; the network and daemon fields come from `health-check` on its own 60 s timer, so those can be up to a minute old. `POST` the same URL to refresh this on demand.
+Whatever the last check found. `generated` is how you tell how old that is. The gadget and game fields come from the scan tick, which runs on the next second after the host writes anything, so during a game they are never more than a tick behind and on a quiet station they are at most a minute old; the network and daemon fields come from `health-check` on its own 60 s timer, so those can be up to a minute old. `POST` the same URL to refresh this on demand.
 
 The `game` field is `null` on a fresh boot. Otherwise `live` says whether the last replay is still being written, and `ports` carries the character, costume colour and nametag of each occupied port:
 
@@ -244,21 +231,21 @@ Hold the button on the side of the board while plugging it in to enter download 
 
 ### Error labels
 
-| Label           | What happened                                                                                              |
-| --------------- | ---------------------------------------------------------------------------------------------------------- |
-| `NO ID`         | The board's factory MAC is unset or all zeroes. Refusing to boot.                                          |
-| `NO SD CARD`    | The card slot came up empty, or no card responded.                                                         |
-| `SD UNREADABLE` | A card is present but its filesystem will not mount.                                                       |
-| `WRONG FORMAT`  | A card is readable, but has no FAT32 partition or one over 16 GiB.                                         |
-| `NO CONFIG`     | `CONFIG/config.txt` could not be read.                                                                     |
-| `BAD CONFIG`    | The file was read and rejected. The detail line names the bad key.                                         |
-| `NO USB`        | The USB stack would not start. The station halts. (A host that simply never reads is `NO WII`, a warning.) |
-| `NO WIFI`       | Did not associate with the configured SSID.                                                                |
-| `WRONG WIFI`    | Associated, but with a different network than`config.txt` asks for.                                        |
-| `NO IP`         | Associated, but the network handed out no address.                                                         |
-| `NO HTTP`       | Nothing answered on port 80. It is collecting replays it cannot serve.                                     |
-| `NO MDNS`       | It will not appear in a discovery browse. Replays are unaffected.                                          |
-| `CRASHED`       | The firmware panicked. The faulting task is parked; the station is still recording.                        |
+| Label           | What happened                                                                                             |
+| --------------- | --------------------------------------------------------------------------------------------------------- |
+| `NO ID`         | The board's factory MAC is unset or all zeroes. Refusing to boot.                                         |
+| `NO SD CARD`    | The card slot came up empty, or no card responded.                                                        |
+| `SD UNREADABLE` | A card is present but its filesystem will not mount.                                                      |
+| `WRONG FORMAT`  | A card is readable, but has no FAT32 partition or one over 16 GiB.                                        |
+| `NO CONFIG`     | `CONFIG/config.txt` could not be read.                                                                    |
+| `BAD CONFIG`    | The file was read and rejected. The detail line names the bad key.                                        |
+| `NO USB`        | The USB stack would not start. The station halts. (A host that simply never reads is`NO WII`, a warning.) |
+| `NO WIFI`       | Did not associate with the configured SSID.                                                               |
+| `WRONG WIFI`    | Associated, but with a different network than`config.txt` asks for.                                       |
+| `NO IP`         | Associated, but the network handed out no address.                                                        |
+| `NO HTTP`       | Nothing answered on port 80. It is collecting replays it cannot serve.                                    |
+| `NO MDNS`       | It will not appear in a discovery browse. Replays are unaffected.                                         |
+| `CRASHED`       | The firmware panicked. The faulting task is parked; the station is still recording.                       |
 
 ### Warning labels
 
@@ -267,7 +254,7 @@ Hold the button on the side of the board while plugging it in to enter download 
 | `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.             |
 | `DRIVE FULL`    | `FILE-CAP` replays are on the card. New ones are no longer served. Delete some.                          |
 | `NO WII`        | Nothing has read this drive in ten seconds — a charger, a dead port, or a console that never mounted it. |
-| `DRIVE FILLING` | The card is past 75% of `FILE-CAP`. Delete replays before it stops serving new ones.                     |
+| `DRIVE FILLING` | The card is past 75% of`FILE-CAP`. Delete replays before it stops serving new ones.                      |
 
 ### A warning about FAT cache
 
