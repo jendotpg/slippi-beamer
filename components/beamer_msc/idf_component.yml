@@ -1,0 +1,6 @@
+dependencies:
+  idf: ">=5.0"
+  espressif/tinyusb:
+    version: "^0.21"
+  espressif/mdns:
+    version: "^1.4"

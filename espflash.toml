@@ -1,0 +1,6 @@
+[idf_format_args]
+partition_table = "partitions.csv"
+bootloader = "target/xtensa-esp32s3-espidf/release/bootloader.bin"
+
+[flash]
+size = "16MB"

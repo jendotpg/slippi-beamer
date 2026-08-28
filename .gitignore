@@ -1,3 +1,7 @@
 dist/
 .cache/
 .DS_Store
+target/
+.embuild/
+.vscode
+components_esp32s3.lock

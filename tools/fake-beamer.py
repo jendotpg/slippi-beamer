@@ -14,12 +14,10 @@ tools/fake-beamer.py --name beamer-virtual-2 --port 8082 --replays ~/Slippi/ --g
 Run several on different ports to simulate a fleet. The app honours the port a
 station advertises, so they coexist happily on one machine.
 
-The game payload is not canned: it comes from the real slp-peek, compiled from
-image/scripts/slp-peek.c, run against a real .slp exactly as status-check.sh
-does on a station. That is what makes the character icons in the app a real
-test rather than a drawing exercise. Build it once with:
-
-    cc -Os -Wall -o /tmp/slp-peek image/scripts/slp-peek.c
+The game payload is not canned: --game is read out of a real .slp by the peek
+below, a port of the same beamer::slp the firmware runs. That is what makes the
+character icons in the app a real test rather than a drawing exercise, and it
+needs nothing built -- no Rust, no C, no cross-compiler.
 
 What this deliberately does NOT emulate: the gadget, the LED, the config file,
 the reset endpoint's actual destruction, and any of the timing of a real Zero W.
@@ -48,12 +46,207 @@ def iso_now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def find_slp_peek(explicit):
-    """The real thing if we can find it, else nothing and we report no game."""
-    for candidate in (explicit, "/tmp/slp-peek", shutil.which("slp-peek")):
-        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    return None
+# A port of beamer::slp (src/slp.rs)
+PEEK_BYTES = 1024
+MAGIC = b"{U\x03raw[$U#l"
+GS_DEEPEST = 0x1A1
+CHARS = [
+    ("Falcon",  [None, "black", "red", "white", "green", "blue"]),
+    ("DK",      [None, "black", "red", "blue", "green"]),
+    ("Fox",     [None, "red", "blue", "green"]),
+    ("GW",      [None, "red", "blue", "green"]),
+    ("Kirby",   [None, "yellow", "blue", "red", "green", "white"]),
+    ("Bowser",  [None, "red", "blue", "black"]),
+    ("Link",    [None, "red", "blue", "black", "white"]),
+    ("Luigi",   [None, "white", "blue", "red"]),
+    ("Mario",   [None, "yellow", "black", "blue", "green"]),
+    ("Marth",   [None, "red", "green", "black", "white"]),
+    ("Mewtwo",  [None, "red", "blue", "green"]),
+    ("Ness",    [None, "gold", "blue", "green"]),
+    ("Peach",   [None, "gold", "white", "blue", "green"]),
+    ("Pikachu", [None, "red", "blue", "green"]),
+    ("ICs",     [None, "green", "yellow", "red"]),
+    ("Puff",    [None, "red", "blue", "green", "gold"]),
+    ("Samus",   [None, "pink", "dark", "green", "blue"]),
+    ("Yoshi",   [None, "red", "blue", "yellow", "pink", "cyan"]),
+    ("Zelda",   [None, "red", "blue", "green", "white"]),
+    ("Sheik",   [None, "red", "blue", "green", "white"]),
+    ("Falco",   [None, "red", "blue", "green"]),
+    ("YL",      [None, "red", "blue", "white", "black"]),
+    ("Doc",     [None, "red", "blue", "green", "black"]),
+    ("Roy",     [None, "red", "blue", "green", "gold"]),
+    ("Pichu",   [None, "red", "blue", "green"]),
+    ("Ganon",   [None, "red", "blue", "green", "purple"]),
+]
+
+
+class PeekError(Exception):
+    """Any failure here means do not publish. Messages match PeekError::as_str
+    in src/slp.rs, and slp-peek.c before it, so a log line greps the
+    same across all three."""
+
+REPLACEMENT = "\ufffd"
+
+SJIS_81 = [
+    0x3000, 0x3001, 0x3002, 0xFF0C, 0xFF0E, 0x30FB, 0xFF1A, 0xFF1B,
+    0xFF1F, 0xFF01, 0x309B, 0x309C, 0x00B4, 0xFF40, 0x00A8, 0xFF3E,
+    0xFFE3, 0xFF3F, 0x30FD, 0x30FE, 0x309D, 0x309E, 0x3003, 0x4EDD,
+    0x3005, 0x3006, 0x3007, 0x30FC, 0x2015, 0x2010, 0xFF0F, 0xFF3C,
+    0x301C, 0x2016, 0xFF5C, 0x2026, 0x2025, 0x2018, 0x2019, 0x201C,
+    0x201D, 0xFF08, 0xFF09, 0x3014, 0x3015, 0xFF3B, 0xFF3D, 0xFF5B,
+    0xFF5D, 0x3008, 0x3009, 0x300A, 0x300B, 0x300C, 0x300D, 0x300E,
+    0x300F, 0x3010, 0x3011, 0xFF0B, 0x2212, 0x00B1, 0x00D7, 0x00F7,
+    0xFF1D, 0x2260, 0xFF1C, 0xFF1E, 0x2266, 0x2267, 0x221E, 0x2234,
+    0x2642, 0x2640, 0x00B0, 0x2032, 0x2033, 0x2103, 0xFFE5, 0xFF04,
+    0x00A2, 0x00A3, 0xFF05, 0xFF03, 0xFF06, 0xFF0A, 0xFF20, 0x00A7,
+    0x2606, 0x2605, 0x25CB, 0x25CF, 0x25CE, 0x25C7, 0x25C6, 0x25A1,
+    0x25A0, 0x25B3, 0x25B2, 0x25BD, 0x25BC, 0x203B, 0x3012, 0x2192,
+    0x2190, 0x2191, 0x2193, 0x3013, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x2208,
+    0x220B, 0x2286, 0x2287, 0x2282, 0x2283, 0x222A, 0x2229, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x2227,
+    0x2228, 0x00AC, 0x21D2, 0x21D4, 0x2200, 0x2203, 0x0000, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x0000, 0x2220, 0x22A5, 0x2312, 0x2202, 0x2207, 0x2261, 0x2252,
+    0x226A, 0x226B, 0x221A, 0x223D, 0x221D, 0x2235, 0x222B, 0x222C,
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x212B,
+    0x2030, 0x266F, 0x266D, 0x266A, 0x2020, 0x2021, 0x00B6, 0x0000,
+    0x0000, 0x0000, 0x0000, 0x25EF,
+]
+
+
+def trail_index(lo):
+    """Position of a trail byte within its lead byte's row. 0x7F is not a valid
+    trail byte, so the range skips it."""
+    return (lo - 0x40) - (1 if lo > 0x7F else 0)
+
+
+def sjis_next(p):
+    """Decode one character, returning it and how many bytes it consumed."""
+    hi = p[0]
+
+    if 0x20 <= hi <= 0x7E:
+        return chr(hi), 1
+    # Half-width katakana.
+    if 0xA1 <= hi <= 0xDF:
+        return chr(0xFF61 + (hi - 0xA1)), 1
+
+    if len(p) < 2 or not (0x81 <= hi <= 0x83):
+        return REPLACEMENT, 1
+
+    lo = p[1]
+    if not (0x40 <= lo <= 0xFC) or lo == 0x7F:
+        return REPLACEMENT, 1
+
+    if hi == 0x81:
+        cp = SJIS_81[trail_index(lo)] if trail_index(lo) < len(SJIS_81) else 0
+        if cp == 0:
+            return REPLACEMENT, 2
+    elif hi == 0x82:
+        if 0x4F <= lo <= 0x58:
+            cp = 0xFF10 + (lo - 0x4F)  # full-width digits
+        elif 0x60 <= lo <= 0x79:
+            cp = 0xFF21 + (lo - 0x60)  # full-width A-Z
+        elif 0x81 <= lo <= 0x9A:
+            cp = 0xFF41 + (lo - 0x81)  # full-width a-z
+        elif 0x9F <= lo <= 0xF1:
+            cp = 0x3041 + (lo - 0x9F)  # hiragana
+        else:
+            return REPLACEMENT, 2
+    elif lo <= 0x96:
+        cp = 0x30A1 + trail_index(lo)  # katakana
+    else:
+        return REPLACEMENT, 2
+
+    return chr(cp), 2
+
+
+def decode_nametag(tag):
+    """Decode a 16-byte nametag field. None for an empty tag, matching the C,
+    which prints null when it decoded nothing."""
+    out = []
+    i = 0
+    while i < len(tag):
+        if tag[i] == 0:
+            break
+        c, used = sjis_next(tag[i:])
+        out.append(c)
+        i += used
+    return "".join(out) or None
+
+
+def peek(buf):
+    n = len(buf)
+
+    if n < 17 or not buf.startswith(MAGIC):
+        raise PeekError("not an .slp file")
+
+    # The `raw` element's length. Slippi writes it last, so zero means the game
+    # is still being played.
+    live = int.from_bytes(buf[11:15], "big") == 0
+
+    if buf[15] != 0x35:
+        raise PeekError("no event payloads command")
+
+    # Event Payloads: one size byte covering itself plus three bytes per entry.
+    psz = buf[16]
+    if psz < 4 or (psz - 1) % 3 != 0:
+        raise PeekError("bad event payloads size")
+
+    nent = (psz - 1) // 3
+    if 17 + 3 * nent > n:
+        raise PeekError("truncated event payloads")
+
+    # The declared size of the Game Start payload says whether this replay is
+    # old enough to predate nametags.
+    gs_size = 0
+    for i in range(nent):
+        if buf[17 + 3 * i] == 0x36:
+            gs_size = int.from_bytes(buf[18 + 3 * i : 20 + 3 * i], "big")
+            break
+
+    gs = 15 + 1 + psz
+
+    if gs + 0xD4 >= n or buf[gs] != 0x36:
+        raise PeekError("truncated or missing game start")
+
+    has_nametags = gs_size + 1 >= GS_DEEPEST
+    if has_nametags and gs + GS_DEEPEST > n:
+        raise PeekError("truncated game start")
+
+    ports = []
+    for i in range(4):
+        pb = gs + 0x65 + 0x24 * i
+        cid = buf[pb]
+        player_type = buf[pb + 1]
+        costume = buf[pb + 3]
+
+        # 0 is human, 1 is CPU. Anything else (2 = demo, 3 = empty) is not a
+        # player and is left out entirely.
+        if player_type not in (0, 1):
+            continue
+
+        entry = CHARS[cid] if cid < len(CHARS) else None
+        color = None
+        if entry is not None and costume < len(entry[1]):
+            color = entry[1][costume]
+
+        ports.append(
+            {
+                "port": i + 1,
+                "char": entry[0] if entry else None,
+                "char_id": cid if entry else None,
+                "color": color,
+                "costume": costume,
+                "nametag": (
+                    decode_nametag(buf[gs + 0x161 + 0x10 * i :][:16])
+                    if has_nametags
+                    else None
+                ),
+            }
+        )
+
+    return {"live": live, "ports": ports}
 
 
 class Station:
@@ -65,31 +258,24 @@ class Station:
         self.station_name = args.station_name or ""
         self.boot = iso_now()
         self.started = time.monotonic()
-        self.slp_peek = find_slp_peek(args.slp_peek)
         self.lock = threading.Lock()
         self.generated = iso_now()
         self.game = self.read_game()
 
     def read_game(self):
-        """Run the real slp-peek, the same way status-check.sh does."""
-        if not self.args.game or not self.slp_peek:
+        """Peek at --game, the same way the scan tick does on a station."""
+        if not self.args.game:
             return None
         try:
-            out = subprocess.run(
-                [self.slp_peek, self.args.game],
-                capture_output=True,
-                timeout=10,
-                check=True,
-            )
-        except (subprocess.SubprocessError, OSError) as e:
-            print(f"fake-beamer: slp-peek failed: {e}", file=sys.stderr)
+            with open(self.args.game, "rb") as f:
+                buf = f.read(PEEK_BYTES)
+        except OSError as e:
+            print(f"fake-beamer: cannot read {self.args.game}: {e}", file=sys.stderr)
             return None
         try:
-            return json.loads(out.stdout)
-        except json.JSONDecodeError:
-            print(
-                "fake-beamer: slp-peek printed something unparseable", file=sys.stderr
-            )
+            return peek(buf)
+        except PeekError as e:
+            print(f"fake-beamer: {self.args.game}: {e}", file=sys.stderr)
             return None
 
     def replays(self):
@@ -292,7 +478,6 @@ def main():
     parser.add_argument("--replays", default="", help="directory of .slp to serve")
     parser.add_argument("--game", default="", help=".slp to report as the current game")
     parser.add_argument("--served", type=int, default=DEFAULT_SERVED)
-    parser.add_argument("--slp-peek", default="", help="path to a built slp-peek")
     parser.add_argument("--unhealthy", action="store_true", help='report result "fail"')
     parser.add_argument("--unreported", action="store_true", help="503 on GET /status")
     parser.add_argument(
@@ -309,13 +494,6 @@ def main():
         parser.error(f"--game {args.game} is not a file")
 
     station = Station(args)
-    if args.game and not station.slp_peek:
-        print(
-            "fake-beamer: no slp-peek found, so no game will be reported.\n"
-            "             cc -Os -Wall -o /tmp/slp-peek image/scripts/slp-peek.c",
-            file=sys.stderr,
-        )
-
     handler = type("BoundHandler", (Handler,), {"station": station})
     server = ThreadingHTTPServer(("0.0.0.0", args.port), handler)
     advertiser = advertise(args.name, args.port)
