@@ -61,11 +61,12 @@ The screen shows only the first error of the boot, with`+N more` beneath it when
 1. Insert a microSD card into the dongle formatted as FAT32 with a first partition of 4GB or smaller.
    1. The microSD slot is INSIDE the usb jack! Remove the dummy card that comes inside to insert the new one.
 2. Hold the button on the side of the board dongle while you plug it into your laptop, then let go. Then press flash on [the flashing page](https://jendotpg.github.io/slippi-beamer/)
-   1. Unplug and replug the dongle to leave download mode. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`. A microSD card that is exFAT, unpartitioned, or partitioned larger than 4GB shows `WRONG FORMAT` on the screen — see [Card size](#card-size).
-3. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
+   1. "Leaving..." means its done - you don't have to wait any longer!
+3. Unplug and replug the dongle to leave download mode. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`. A microSD card that is exFAT, unpartitioned, or partitioned larger than 4GB shows `WRONG FORMAT` on the screen — see [Card size](#card-size).
+4. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
    1. See [Configuring a station](#configuring-a-station) for more details on this file.
-4. Eject the Beamer and wait until the light and screen go dark.
-5. Plug the Beamer into a Wii and watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go!
+5. Eject the Beamer and wait until the light and screen go dark.
+6. Plug the Beamer into a Wii and watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go!
    1. If it instead shows an error label in large text — and the LED starts blinking fast — that label is your diagnosis. [Error labels](#error-labels) says what each one means. The screen gives you one line of detail; for the full text, unplug the Beamer from the Wii, bring it back to your laptop, and read `LOGS/error.txt`.
    2. Note that `error.txt` is from the LAST session! If you update and replug directly into the laptop without trying on a Wii in between, watch the screen instead — there will still be an `error.txt` and it will be describing the previous boot, not the current one!
 
