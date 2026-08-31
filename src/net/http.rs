@@ -70,6 +70,7 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
         match volume::wipe_replays(&reset_card) {
             Ok(n) => {
                 scan::forget_all();
+                scan::refresh();
                 log::warn!("reset: {n} replay(s) erased");
                 respond_json(req, 200, br#"{"ok": true, "message": "reset OK"}"#)
             }

@@ -7,15 +7,14 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 Major TODOs still:
 
 1. some measure of "how long has the set been going" on
-2. run status tick on reset-beamer, so that its updated
-3. make /SLIPPI/ index work like /status (i.e. only refresh on POST, just show the default on GET)
-4. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
-5. get replay reporter up to date!
-6. provide a way to update config files OTA
+2. make /SLIPPI/ index work like /status (i.e. only refresh on POST, just show the default on GET)
+3. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
+4. get replay reporter up to date!
+5. provide a way to update config files OTA
    1. TO custom idle message (to say bo5, stadium frozen, etc) - this can be config time, just updated OTA
 
-7. colorblind mode? amber > blue, perhaps?
-8. support other boards with different pinouts! different build options, maybe?
+6. colorblind mode? amber > blue, perhaps?
+7. support other boards with different pinouts! different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
 ## Configuring a station
@@ -164,8 +163,6 @@ A few notes:
 `GET /` returns `403`. There is no page at the root and no directory listing anywhere; that is the endpoint working, not a broken station.
 
 Both POSTs take a lock, so a reset and a status refresh can never be in flight at once. The loser gets `409` immediately rather than a request that hangs.
-
-A reset does not refresh the cached `/status`, so `replay_count` there stays stale until the next tick or `POST /status`.
 
 A reset is refused with `409` while a replay is going out, because unlinking a file an in-flight download has open truncates it without either end being told — and somebody mid-collection is exactly who a reset would hurt. Retry once the transfer finishes.
 
