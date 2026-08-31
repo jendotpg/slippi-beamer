@@ -35,15 +35,11 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SCHEMA = 1
 DEFAULT_SERVED = 10
-
-
-def iso_now():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+DEFAULT_CAP = 512
 
 
 # A port of beamer::slp (src/slp.rs)
@@ -421,10 +417,7 @@ class Station:
         self.args = args
         self.station_id = args.station or str(uuid.uuid5(uuid.NAMESPACE_DNS, args.name))
         self.station_name = args.station_name or ""
-        self.boot = iso_now()
-        self.started = time.monotonic()
         self.lock = threading.Lock()
-        self.generated = iso_now()
         self.game = self.read_game()
 
     def read_game(self):
@@ -459,50 +452,34 @@ class Station:
         return names[: self.args.served]
 
     def refresh(self):
-        """What POST /status does: re-run the checks, restamp the report."""
+        """What POST /status does: re-run the checks."""
         with self.lock:
             self.game = self.read_game()
-            self.generated = iso_now()
 
     def status(self):
         with self.lock:
-            game, generated = self.game, self.generated
+            game = self.game
         return {
             "schema": SCHEMA,
-            "generated": generated,
-            "station": self.station_id,
+            "arch": "fake",
+            "station_id": self.station_id,
             "station_name": self.station_name,
-            "host": self.args.name,
-            "boot": self.boot,
-            "uptime_s": int(time.monotonic() - self.started),
-            "wifi": self.args.wifi,
-            "network": "ok",
-            "ip": "127.0.0.1",
-            "slippi_files": len(self.replays()),
-            "slippi_files_capped": False,
-            "udc": "fake",
-            "host_state": "configured",
-            "mtools": True,
-            "lighttpd": True,
-            "sshd": True,
-            "mdns": True,
+            "ssid": self.args.wifi,
+            "replay_count": len(self.replays()),
+            "replay_cap": self.args.cap,
+            "ssh": False,
             "game": game,
-            "result": self.result(),
-            "errors": (
-                ["fake-beamer was started with --unhealthy"]
-                if self.args.unhealthy
-                else []
-            ),
+            "health": self.health(),
             "warnings": self.warnings(),
         }
 
     def warnings(self):
         return [w.strip().upper() for w in self.args.warn.split(",") if w.strip()]
 
-    def result(self):
+    def health(self):
         if self.args.unhealthy:
-            return "fail"
-        return "warn" if self.warnings() else "pass"
+            return "error"
+        return "warn" if self.warnings() else "ok"
 
     def index(self):
         names = self.replays()
@@ -516,15 +493,13 @@ class Station:
                 {
                     "name": name,
                     "size": size,
-                    "mtime": iso_now(),
                     "url": f"/SLIPPI/{name}",
                 }
             )
         return {
             "schema": SCHEMA,
-            "station": self.station_id,
-            "generated": iso_now(),
-            "count": len(files),
+            "station_id": self.station_id,
+            "served_replay_count": len(files),
             "files": files,
         }
 
@@ -652,7 +627,12 @@ def main():
     parser.add_argument("--replays", default="", help="directory of .slp to serve")
     parser.add_argument("--game", default="", help=".slp to report as the current game")
     parser.add_argument("--served", type=int, default=DEFAULT_SERVED)
-    parser.add_argument("--unhealthy", action="store_true", help='report result "fail"')
+    parser.add_argument(
+        "--cap", type=int, default=DEFAULT_CAP, help="REPLAY-CAP the station reports"
+    )
+    parser.add_argument(
+        "--unhealthy", action="store_true", help='report health "error"'
+    )
     parser.add_argument(
         "--warn",
         default="",

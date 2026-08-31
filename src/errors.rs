@@ -161,15 +161,6 @@ pub fn session_has_errors() -> bool {
     !s.session.is_empty() || !s.late.is_empty()
 }
 
-pub fn json_errors() -> Vec<String> {
-    let s = store();
-    s.session
-        .lines()
-        .chain(s.late.lines())
-        .map(str::to_owned)
-        .collect()
-}
-
 fn have_errors(s: &Store) -> bool {
     !s.prev.is_empty() || !s.session.is_empty()
 }

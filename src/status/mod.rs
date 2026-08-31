@@ -98,10 +98,6 @@ pub fn set_net(net: Net) {
     publish(|d| d.net = net);
 }
 
-pub fn net() -> Net {
-    detail().as_ref().map(|d| d.net).unwrap_or_default()
-}
-
 pub fn set_activity(writing: bool, sending: bool) {
     publish(|d| {
         d.writing = writing;

@@ -183,18 +183,20 @@ fn error_body(msg: &str) -> String {
 }
 
 fn status_body() -> String {
+    let id = super::check::identity();
     report::status_json(
-        scan::uptime_s(),
+        &id.station,
+        &id.station_name,
+        id.ssid.as_deref(),
         &scan::fast(),
-        &super::check::health(),
-        &errors::json_errors(),
+        scan::replay_cap(),
         errors::session_has_errors(),
         &crate::warnings::labels(),
         match super::result() {
-            super::NetResult::Ok => report::Verdict::Pass,
-            super::NetResult::Pending => report::Verdict::Pending,
-            super::NetResult::Offline => report::Verdict::Pass, // this means no ssid was set in config!
-            super::NetResult::Fail => report::Verdict::Fail,
+            super::NetResult::Ok => report::Health::Ok,
+            super::NetResult::Pending => report::Health::Starting,
+            super::NetResult::Offline => report::Health::Ok, // this means no ssid was set in config!
+            super::NetResult::Fail => report::Health::Error,
         },
     )
 }

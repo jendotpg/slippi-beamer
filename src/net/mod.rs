@@ -194,13 +194,11 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         }
     };
 
-    let identity = check::Identity {
+    check::set(check::Identity {
         station: plan.station.clone(),
         station_name: plan.station_name.clone(),
-        host: plan.hostname.clone(),
         ssid: Some(join.ssid.clone()),
-        mdns: mdns.is_some(),
-    };
+    });
 
     if server.is_some() && mdns.is_some() {
         set_result(NetResult::Ok);
@@ -211,10 +209,6 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         );
     } else {
         set_result(NetResult::Fail);
-    }
-
-    if let Err(e) = check::spawn(identity) {
-        log::warn!("the health task would not start: {e}");
     }
 
     let mut since_tick = Duration::ZERO;

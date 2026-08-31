@@ -6,16 +6,18 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 Major TODOs still:
 
-1. provide button-based way to delete files (three clicks, confirm with a hold? something like?)
-2. stop serving on eject -> shutdown
-3. provide a way to update config files OTA
-4. audit /status json
+1. stop serving on eject -> shutdown
+2. some measure of "how long has the set been going" on
+3. run status tick on reset-beamer, so that its updated
+4. make /SLIPPI/ index work like /status (i.e. only refresh on POST, just show the default on GET)
 5. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
-6. Fleet testing. Multiple stations, mDNS name collisions, AP contention.
-7. support other boards with different pinouts! different build options, maybe?
-   1. order and test Waveshare ESP32-S3-LCD-1.47 version
+6. get replay reporter up to date!
+7. provide a way to update config files OTA
+   1. TO custom idle message (to say bo5, stadium frozen, etc) - this can be config time, just updated OTA
 
 8. colorblind mode? amber > blue, perhaps?
+9. support other boards with different pinouts! different build options, maybe?
+   1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
 ## Configuring a station
 
@@ -29,7 +31,7 @@ Major TODOs still:
 | `HIDDEN`             | `false`        | Whether the network broadcasts its name.                                                                                                                   |
 | `STATION-NAME`       | the station ID | What to call this station. Appears as`station_name` in `GET /status`, and as the station's hostname (slugged - see [Station Identity](#station-identity)). |
 | `NUM-REPLAYS-SERVED` | `10`           | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                   |
-| `FILE-CAP`           | `512`          | How many replays the station counts on the card before it stops counting. 1 to 2048. Past 75% it warns; at the cap it warns and stops serving new replays. |
+| `REPLAY-CAP`         | `512`          | How many replays the station counts on the card before it stops counting. 1 to 2048. Past 75% it warns; at the cap it warns and stops serving new replays. |
 | `LED-BRIGHTNESS`     | `20`           | The status LED, 0 to 100 percent.                                                                                                                          |
 | `DEBUG`              | `false`        | Whether to keep a`LOGS/debug.txt` of each boot. Off means the journal records nothing at all. These files are never deleted automatically.                 |
 
@@ -113,42 +115,20 @@ Every station advertises `_beamer._tcp` on port 80 over mDNS, and the instance n
 
 ### `GET /status`
 
-Whatever the last check found. `generated` is how you tell how old that is. The gadget and game fields come from the scan tick, which runs on the next second after the host writes anything, so during a game they are never more than a tick behind and on a quiet station they are at most a minute old; the network and daemon fields come from `health-check` on its own 60 s timer, so those can be up to a minute old. `POST` the same URL to refresh this on demand.
-
-The `game` field is `null` on a fresh boot. Otherwise `live` says whether the last replay is still being written, and `ports` carries the character, costume colour and nametag of each occupied port:
-
-`game` is `null` until this station has watched a game start. It does not guess from a card it has not seen being written — see [Publishing](#publishing) below, which is the same rule the `/SLIPPI/` index follows.
-
-Timestamps are meaningless - it's just a monotonic clock with boot at the UNIX epoch.
-
-`sshd` is always `false`**.**
-
-`result` is `"pass"`, `"pending"`, `"warn"` or `"fail"`. `"warn"` means the `warnings` array is non-empty and `errors` is not: the station is still recording, still serving and still safe to unplug, but something about it is off. An error always outranks a warning.
+Everything here is cached by the scan tick so this `GET` has minimal cost.`POST` the same URL to rescan on demand. `ssh` is always `false` on esp32; it is in the contract because a Pi genuinely can offer it. `game` is `null` until this station has watched a game start. `live` says whether the last replay is still being written, and `ports` carries the character, costume colour and nametag of each occupied port during the last recorded game. `replay_count` and `replay_cap` are meant to be read together: `replay_count / replay_cap` is how full the drive is, and `replay_count == replay_cap` means counting stopped there. `health` is `"ok"`, `"starting"`, `"warn"` or `"error"`. `"starting"` means the network has not finished coming up yet. `"warn"` means the `warnings` array is non-empty: the station is still theoretically recording, still serving and still safe to unplug, but something about it is off (usually the replay count is approaching cap or the Wii is failing to mount the Beamer).
 
 ```json
 {
   "schema": 1,
-  "beamer_arch": "esp32",
-  "generated": "1970-01-01T03:12:00Z",
-  "station": "3f2a…",
+  "arch": "esp32",
+  "station_id": "3f2a...",
   "station_name": "stream station 2",
-  "host": "beamer-3f2a…",
-  "boot": "1970-01-01T00:00:00Z",
-  "uptime_s": 11520,
-  "wifi": "nycmelee",
-  "network": "associated with \"nycmelee\"",
-  "ip": "192.168.1.42",
-  "slippi_files": 47,
-  "slippi_files_capped": false,
-  "udc": "esp32s3-otg",
-  "bind_time_s": 12.4,
-  "host_state": "configured",
-  "mtools": true,
-  "httpd": true,
-  "sshd": false,
-  "mdns": true,
-  "result": "pass",
-  "errors": [],
+  "ssid": "nycmelee",
+  "replay_count": 47,
+  "replay_cap": 512,
+  "ssh": false,
+  "game": null,
+  "health": "ok",
   "warnings": []
 }
 ```
@@ -160,14 +140,12 @@ Rendered when the set of published replays changes, never per request. There is 
 ```json
 {
   "schema": 1,
-  "station": "3f2a…",
-  "generated": "2026-08-14T18:22:01Z",
-  "count": 2,
+  "station_id": "3f2a...",
+  "served_replay_count": 2,
   "files": [
     {
       "name": "Game_20260814T181203.slp",
       "size": 412393,
-      "mtime": "2026-08-14T18:22:01Z",
       "url": "/SLIPPI/Game_20260814T181203.slp"
     }
   ]
@@ -176,9 +154,9 @@ Rendered when the set of published replays changes, never per request. There is 
 
 A few notes:
 
-- `count` and `slippi_files` are different: `count` is how many replays are **retrievable** and `slippi_files` is how many are on the drive
-- `slippi_files` maxes out at 2000 (TODO: make this tunable) for performance reasons - directory walks are expensive!
-- Only `*.slp` is listed or served and filenames can't have spaces or unexpected special characters - this is meant for reading off of a Wii!
+- `served_replay_count` is how many replays are **retrievable**; `replay_count` is how many are on the drive
+- `replay_count` stops at `replay_cap` (`REPLAY-CAP`, default 512) for performance reasons - directory walks are expensive!
+- Only `*.slp` are listed or served and filenames can't have spaces or unexpected special characters - this is meant for reading off of a Wii!
 
 ### Odds and ends
 
@@ -186,9 +164,7 @@ A few notes:
 
 Both POSTs take a lock, so a reset and a status refresh can never be in flight at once. The loser gets `409` immediately rather than a request that hangs.
 
-A reset does not refresh the cached `/status`, so `slippi_files` there stays stale until the next tick or `POST /status`.
-
-`POST /status` re-runs the scan tick only, never the health check.
+A reset does not refresh the cached `/status`, so `replay_count` there stays stale until the next tick or `POST /status`.
 
 A reset is refused with `409` while a replay is going out, because unlinking a file an in-flight download has open truncates it without either end being told — and somebody mid-collection is exactly who a reset would hurt. Retry once the transfer finishes.
 
@@ -251,9 +227,9 @@ Hold the button on the side of the board while plugging it in to enter download 
 | Label           | What is off                                                                                              |
 | --------------- | -------------------------------------------------------------------------------------------------------- |
 | `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.             |
-| `DRIVE FULL`    | `FILE-CAP` replays are on the card. New ones are no longer served. Delete some.                          |
+| `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served. Delete some.                        |
 | `NO WII`        | Nothing has read this drive in ten seconds — a charger, a dead port, or a console that never mounted it. |
-| `DRIVE FILLING` | The card is past 75% of`FILE-CAP`. Delete replays before it stops serving new ones.                      |
+| `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.                    |
 
 ### A warning about FAT cache
 
@@ -311,33 +287,33 @@ The main memory constraint is the largest free block, not the number of free byt
 
 #### Dynamically allocated
 
-| Allocator                                                                                   |                      Block | Rate                                              |
-| ------------------------------------------------------------------------------------------- | -------------------------: | ------------------------------------------------- |
-| lwIP pcbs, pbufs and tcp_segs — built with`MEMP_MEM_MALLOC=1`, so there are no static pools |           200 B – 23,040 B | continuous, per connection and per packet         |
-| A replay download's TCP send queue —`CONFIG_LWIP_TCP_SND_BUF_DEFAULT`, 16 × MSS             | ≤23,040 B in 1,440 B pbufs | held for the length of one `GET /SLIPPI/<file>`   |
-| WiFi dynamic TX buffers, 32 cap                                                             |                   ~1,600 B | per transmit burst                                |
-| mDNS per-packet buffer,`MALLOC_CAP_INTERNAL`                                                |                   ≤1,460 B | every multicast on the network                    |
-| FatFs long-filename working buffer                                                          |                      512 B | every`f_open`, `f_opendir`, `f_readdir`, `f_stat` |
-| `vfs_fat_dir_t` for a directory walk                                                        |                     ~330 B | per listing                                       |
-| The scan tick's name-hash vector                                                            |        ≤8,192 B contiguous | per listing                                       |
-| An`OsString` per directory entry                                                            |                      ~40 B | × file count, per listing                         |
-| `GET /status` — the JSON body plus the error array                                          |    ≤7,000 B in many pieces | per request                                       |
+| Allocator                                                                                   |                       Block | Rate                                              |
+| ------------------------------------------------------------------------------------------- | --------------------------: | ------------------------------------------------- |
+| lwIP pcbs, pbufs and tcp_segs — built with`MEMP_MEM_MALLOC=1`, so there are no static pools |            200 B – 23,040 B | continuous, per connection and per packet         |
+| A replay download's TCP send queue —`CONFIG_LWIP_TCP_SND_BUF_DEFAULT`, 16 × MSS             | <=23,040 B in 1,440 B pbufs | held for the length of one`GET /SLIPPI/<file>`    |
+| WiFi dynamic TX buffers, 32 cap                                                             |                    ~1,600 B | per transmit burst                                |
+| mDNS per-packet buffer,`MALLOC_CAP_INTERNAL`                                                |                   <=1,460 B | every multicast on the network                    |
+| FatFs long-filename working buffer                                                          |                       512 B | every`f_open`, `f_opendir`, `f_readdir`, `f_stat` |
+| `vfs_fat_dir_t` for a directory walk                                                        |                      ~330 B | per listing                                       |
+| The scan tick's name-hash vector                                                            |        <=8,192 B contiguous | per listing                                       |
+| An`OsString` per directory entry                                                            |                       ~40 B | × file count, per listing                         |
+| `GET /status` — the JSON body plus the error array                                          |    <=7,000 B in many pieces | per request                                       |
 
 ##### Hard limits
 
-|                         | Limit                                  | Set by                                                                                                                                              |
-| ----------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FatFs volumes           | 2                                      | `CONFIG_FATFS_VOLUME_COUNT` — one is held for the boot by the read window                                                                           |
-| FatFs sector size       | 512 B                                  | `CONFIG_WL_SECTOR_SIZE_512`; it sizes `FATFS.win[]` and every `FIL.buf[]`, and at 4096 the mount context is 21 KB instead of 2.2 KB                 |
-| Open files per mount    | 2                                      | `MAX_FILES` in `storage/fat.rs`                                                                                                                     |
-| Concurrent HTTP sockets | 4                                      | `esp_http_server`, 192 B of state each. It is one task, so handlers run one at a time and only one send queue is ever full                          |
-| TCP send window         | 23,040 B                               | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT`; window/RTT is the download ceiling, so this is what sets it. `CONFIG_LWIP_TCP_WND_DEFAULT` stays at 5,760        |
-| Write-back cache        | 64 sectors                             | `WBC_SECTORS`; `high water` and `stalls` in `LOGS/debug.txt` say whether it is enough                                                               |
-| Replays served          | 16                                     | `NUM-REPLAYS-SERVED` ceiling                                                                                                                        |
-| Replays counted         | `FILE-CAP`, default 512, ceiling 2,048 | `slippi_files` saturates, `slippi_files_capped` goes true                                                                                           |
-| Error text kept         | 2,048 B per store                      | then truncated                                                                                                                                      |
-| Captured log kept       | 4,096 B                                | oldest lines dropped                                                                                                                                |
-| Journal partition       | 64 KB                                  | `jrnl`, separate from `nvs` so diagnostics cannot exhaust a station's durable state; the reset census adds one 37-byte key, rewritten once per boot |
+|                         | Limit                                    | Set by                                                                                                                                              |
+| ----------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FatFs volumes           | 2                                        | `CONFIG_FATFS_VOLUME_COUNT` — one is held for the boot by the read window                                                                           |
+| FatFs sector size       | 512 B                                    | `CONFIG_WL_SECTOR_SIZE_512`; it sizes `FATFS.win[]` and every `FIL.buf[]`, and at 4096 the mount context is 21 KB instead of 2.2 KB                 |
+| Open files per mount    | 2                                        | `MAX_FILES` in `storage/fat.rs`                                                                                                                     |
+| Concurrent HTTP sockets | 4                                        | `esp_http_server`, 192 B of state each. It is one task, so handlers run one at a time and only one send queue is ever full                          |
+| TCP send window         | 23,040 B                                 | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT`; window/RTT is the download ceiling, so this is what sets it. `CONFIG_LWIP_TCP_WND_DEFAULT` stays at 5,760        |
+| Write-back cache        | 64 sectors                               | `WBC_SECTORS`; `high water` and `stalls` in `LOGS/debug.txt` say whether it is enough                                                               |
+| Replays served          | 16                                       | `NUM-REPLAYS-SERVED` ceiling                                                                                                                        |
+| Replays counted         | `REPLAY-CAP`, default 512, ceiling 2,048 | `replay_count` saturates at `replay_cap`, both reported in `GET /status`                                                                            |
+| Error text kept         | 2,048 B per store                        | then truncated                                                                                                                                      |
+| Captured log kept       | 4,096 B                                  | oldest lines dropped                                                                                                                                |
+| Journal partition       | 64 KB                                    | `jrnl`, separate from `nvs` so diagnostics cannot exhaust a station's durable state; the reset census adds one 37-byte key, rewritten once per boot |
 
 ### Releasing
 

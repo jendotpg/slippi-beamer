@@ -26,7 +26,7 @@ use crate::storage::{msc, SdCard};
 use crate::warnings::{self, WarningLabel};
 
 const TICK: Duration = Duration::from_secs(1);
-static FILE_CAP: AtomicU32 = AtomicU32::new(crate::config::FILE_CAP_DEFAULT);
+static REPLAY_CAP: AtomicU32 = AtomicU32::new(crate::config::REPLAY_CAP_DEFAULT);
 const MAX_NEW: usize = 8;
 static GAME_LIVE: AtomicBool = AtomicBool::new(false);
 
@@ -39,6 +39,10 @@ pub fn uptime_s() -> u64 {
     (us.max(0) / 1_000_000) as u64
 }
 
+pub fn replay_cap() -> u32 {
+    REPLAY_CAP.load(Ordering::Relaxed)
+}
+
 static FAST: Mutex<Option<report::Fast>> = Mutex::new(None);
 static SET: Mutex<Option<PublishedSet>> = Mutex::new(None);
 
@@ -47,10 +51,7 @@ fn lock<T>(m: &'static Mutex<T>) -> MutexGuard<'static, T> {
 }
 
 pub fn fast() -> report::Fast {
-    lock(&FAST).clone().unwrap_or_else(|| report::Fast {
-        host_state: msc::host_state(),
-        ..Default::default()
-    })
+    lock(&FAST).clone().unwrap_or_default()
 }
 
 pub fn is_published(name: &str) -> bool {
@@ -61,18 +62,18 @@ pub fn index_json() -> Vec<u8> {
     lock(&SET)
         .as_ref()
         .map(|s| s.index_json().to_vec())
-        .unwrap_or_else(|| report::index_json("", uptime_s(), &[]))
+        .unwrap_or_else(|| report::index_json("", &[]))
 }
 
 pub fn forget_all() {
     {
         let mut guard = lock(&SET);
         let Some(s) = guard.as_mut() else { return };
-        s.clear(uptime_s());
+        s.clear();
     }
-    let file_cap = FILE_CAP.load(Ordering::Relaxed);
-    warnings::set_fill(0, file_cap);
-    status::set_files(0, file_cap);
+    let cap = replay_cap();
+    warnings::set_fill(0, cap);
+    status::set_files(0, cap);
 }
 
 pub fn refresh() {
@@ -81,8 +82,8 @@ pub fn refresh() {
 
 static TRACKER: Mutex<Option<Tracker>> = Mutex::new(None);
 
-pub fn spawn(sd: Arc<SdCard>, station: String, cap: usize, file_cap: u32) -> anyhow::Result<()> {
-    FILE_CAP.store(file_cap, Ordering::Relaxed);
+pub fn spawn(sd: Arc<SdCard>, station: String, cap: usize, replay_cap: u32) -> anyhow::Result<()> {
+    REPLAY_CAP.store(replay_cap, Ordering::Relaxed);
     *lock(&SET) = Some(PublishedSet::new(station, cap));
     *lock(&TRACKER) = Some(Tracker::with_card(sd));
 
@@ -219,12 +220,6 @@ impl Tracker {
                     "scan: could not mount to list: {e} ({})",
                     crate::journal::heap_note()
                 );
-                {
-                    let mut f = lock(&FAST);
-                    let f = f.get_or_insert_with(report::Fast::default);
-                    f.mtools = false; // this is a bad sign, but not an error - it can come back.
-                    f.host_state = msc::host_state();
-                }
                 warnings::set(WarningLabel::DriveFailing, true);
                 self.note_mount_failure(&format!("{e}"));
                 return;
@@ -234,7 +229,7 @@ impl Tracker {
         let mut hashes: Vec<u32> = Vec::new();
         let mut fresh: Vec<String> = Vec::new();
         let known = &self.seen;
-        let walk = window.for_each_replay(FILE_CAP.load(Ordering::Relaxed), |name| {
+        let walk = window.for_each_replay(REPLAY_CAP.load(Ordering::Relaxed), |name| {
             let h = hash(name);
             hashes.push(h);
             if known.binary_search(&h).is_err() && fresh.len() < MAX_NEW {
@@ -242,16 +237,10 @@ impl Tracker {
             }
         });
 
-        let (count, capped) = match walk {
+        let (count, _capped) = match walk {
             Ok(v) => v,
             Err(e) => {
                 log::warn!("scan: could not list SLIPPI/: {e}");
-                {
-                    let mut f = lock(&FAST);
-                    let f = f.get_or_insert_with(report::Fast::default);
-                    f.mtools = false;
-                    f.host_state = msc::host_state();
-                }
                 warnings::set(WarningLabel::DriveFailing, true);
                 return;
             }
@@ -268,18 +257,13 @@ impl Tracker {
 
         {
             let mut f = lock(&FAST);
-            let f = f.get_or_insert_with(report::Fast::default);
-            f.mtools = true;
-            f.host_state = msc::host_state();
-            f.bind_time_s = msc::bind_time_s();
-            f.slippi_files = count;
-            f.slippi_files_capped = capped;
+            f.get_or_insert_with(report::Fast::default).replay_count = count;
         }
 
-        let file_cap = FILE_CAP.load(Ordering::Relaxed);
+        let cap = replay_cap();
         warnings::set(WarningLabel::DriveFailing, false);
-        warnings::set_fill(count, file_cap);
-        status::set_files(count, file_cap);
+        warnings::set_fill(count, cap);
+        status::set_files(count, cap);
 
         if first {
             log::info!("scan: baseline -- {count} replay(s) on the card, none served");

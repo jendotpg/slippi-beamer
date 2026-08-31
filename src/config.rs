@@ -7,8 +7,8 @@ pub const SSID_MAX_BYTES: usize = 32;
 pub const PSK_MIN: usize = 8;
 pub const PSK_MAX: usize = 63;
 pub const HOSTNAME_SLUG_MAX: usize = 56;
-pub const FILE_CAP_DEFAULT: u32 = 512;
-pub const FILE_CAP_MAX: u32 = 2048;
+pub const REPLAY_CAP_DEFAULT: u32 = 512;
+pub const REPLAY_CAP_MAX: u32 = 2048;
 pub const LED_PCT_DEFAULT: u8 = 20;
 pub const LED_PCT_MAX: u8 = 100;
 pub const DEBUG_DEFAULT: bool = false;
@@ -170,14 +170,14 @@ impl Default for ReplayCount {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FileCap(u32);
+pub struct ReplayCap(u32);
 
-impl FileCap {
+impl ReplayCap {
     pub fn new(raw: &str) -> Result<Self, ConfigError> {
         let bad = || {
             ConfigError::new(
                 format!(
-                    "FILE-CAP must be a whole number from 1 to {FILE_CAP_MAX} (got \"{raw}\")."
+                    "REPLAY-CAP must be a whole number from 1 to {REPLAY_CAP_MAX} (got \"{raw}\")."
                 ),
                 "Fix it in CONFIG/config.txt.",
             )
@@ -186,7 +186,7 @@ impl FileCap {
             return Err(bad());
         }
         match raw.parse::<u32>() {
-            Ok(n) if (1..=FILE_CAP_MAX).contains(&n) => Ok(FileCap(n)),
+            Ok(n) if (1..=REPLAY_CAP_MAX).contains(&n) => Ok(ReplayCap(n)),
             _ => Err(bad()),
         }
     }
@@ -196,9 +196,9 @@ impl FileCap {
     }
 }
 
-impl Default for FileCap {
+impl Default for ReplayCap {
     fn default() -> Self {
-        FileCap(FILE_CAP_DEFAULT)
+        ReplayCap(REPLAY_CAP_DEFAULT)
     }
 }
 
@@ -272,7 +272,7 @@ pub struct Config {
     network: Network,
     station_name: Option<StationName>,
     num_replays: ReplayCount,
-    file_cap: FileCap,
+    replay_cap: ReplayCap,
     led_brightness: LedBrightness,
     debug: bool,
 }
@@ -290,8 +290,8 @@ impl Config {
         self.num_replays.get()
     }
 
-    pub fn file_cap(&self) -> u32 {
-        self.file_cap.get()
+    pub fn replay_cap(&self) -> u32 {
+        self.replay_cap.get()
     }
 
     pub fn led_brightness(&self) -> LedBrightness {
@@ -342,13 +342,13 @@ impl Config {
             },
         };
 
-        let file_cap = match raw.file_cap.as_deref() {
-            None | Some("") => FileCap::default(),
-            Some(s) => match FileCap::new(s) {
+        let replay_cap = match raw.replay_cap.as_deref() {
+            None | Some("") => ReplayCap::default(),
+            Some(s) => match ReplayCap::new(s) {
                 Ok(v) => v,
                 Err(e) => {
                     errors.push(e);
-                    FileCap::default()
+                    ReplayCap::default()
                 }
             },
         };
@@ -424,7 +424,7 @@ impl Config {
             network,
             station_name,
             num_replays,
-            file_cap,
+            replay_cap,
             led_brightness,
             debug,
         })
@@ -472,7 +472,7 @@ struct Raw {
     hidden: Option<String>,
     station_name: Option<String>,
     num_replays: Option<String>,
-    file_cap: Option<String>,
+    replay_cap: Option<String>,
     led_brightness: Option<String>,
     debug: Option<String>,
 }
@@ -500,7 +500,7 @@ impl Raw {
                 "HIDDEN" => raw.hidden = Some(value),
                 "STATION-NAME" | "STATION_NAME" => raw.station_name = Some(value),
                 "NUM-REPLAYS-SERVED" | "NUM_REPLAYS_SERVED" => raw.num_replays = Some(value),
-                "FILE-CAP" | "FILE_CAP" => raw.file_cap = Some(value),
+                "REPLAY-CAP" | "REPLAY_CAP" => raw.replay_cap = Some(value),
                 "LED-BRIGHTNESS" | "LED_BRIGHTNESS" => raw.led_brightness = Some(value),
                 "DEBUG" => raw.debug = Some(value),
                 _ => {}

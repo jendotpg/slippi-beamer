@@ -137,7 +137,7 @@ pub fn run() -> anyhow::Result<()> {
         sd.clone(),
         id.to_string(),
         settings.num_replays as usize,
-        settings.file_cap,
+        settings.replay_cap,
     ) {
         log::error!("the scan task would not start: {e}");
     }
@@ -265,7 +265,7 @@ pub fn run() -> anyhow::Result<()> {
 
 struct Settings {
     num_replays: u8,
-    file_cap: u32,
+    replay_cap: u32,
     led_global: u8,
     debug: bool,
 }
@@ -276,13 +276,13 @@ impl Settings {
         match outcome {
             Outcome::Applied(cfg) => Settings {
                 num_replays: cfg.num_replays(),
-                file_cap: cfg.file_cap(),
+                replay_cap: cfg.replay_cap(),
                 led_global: cfg.led_brightness().global(),
                 debug: cfg.debug(),
             },
             Outcome::Rejected(_) | Outcome::Unreadable(_) => Settings {
                 num_replays: config::KEEP_DEFAULT,
-                file_cap: config::FILE_CAP_DEFAULT,
+                replay_cap: config::REPLAY_CAP_DEFAULT,
                 led_global: config::LedBrightness::default().global(),
                 debug: config::DEBUG_DEFAULT,
             },
@@ -506,7 +506,7 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
             );
             log::info!(
                 "config: file cap {}, LED {}%, debug {}",
-                cfg.file_cap(),
+                cfg.replay_cap(),
                 cfg.led_brightness().get(),
                 cfg.debug(),
             );
@@ -602,7 +602,7 @@ const CONFIG_TEMPLATE: &str = "\
 #                    network. Blank means use the station's ID.
 # NUM-REPLAYS-SERVED how many of the newest replays this station hands out over
 #                    HTTP. 1 to 16.
-# FILE-CAP           how many replays this station counts on the card before it
+# REPLAY-CAP         how many replays this station counts on the card before it
 #                    stops counting. 1 to 2048.
 # LED-BRIGHTNESS     0 to 100 percent. 0 turns the status LED off completely -
 #                    the screen then becomes the only readout.
@@ -615,7 +615,7 @@ COUNTRY=US
 HIDDEN=false
 STATION-NAME=
 NUM-REPLAYS-SERVED=10
-FILE-CAP=512
+REPLAY-CAP=512
 LED-BRIGHTNESS=20
 DEBUG=false
 ";

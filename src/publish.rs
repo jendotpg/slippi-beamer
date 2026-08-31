@@ -23,7 +23,7 @@ impl PublishedSet {
             station,
             cap: cap.max(1),
         };
-        set.render(0);
+        set.render();
         set
     }
 
@@ -45,7 +45,7 @@ impl PublishedSet {
         });
         self.entries.truncate(self.cap);
 
-        self.render(at);
+        self.render();
         true
     }
 
@@ -65,26 +65,26 @@ impl PublishedSet {
         self.entries.is_empty()
     }
 
-    pub fn clear(&mut self, at: u64) {
+    pub fn clear(&mut self) {
         self.entries.clear();
-        self.render(at);
+        self.render();
     }
 
-    pub fn set_cap(&mut self, cap: usize, at: u64) {
+    pub fn set_cap(&mut self, cap: usize) {
         self.cap = cap.max(1);
         if self.entries.len() > self.cap {
             self.entries.truncate(self.cap);
-            self.render(at);
+            self.render();
         }
     }
 
-    fn render(&mut self, at: u64) {
-        let files: Vec<(String, u64, u64)> = self
+    fn render(&mut self) {
+        let files: Vec<(String, u64)> = self
             .entries
             .iter()
-            .map(|e| (e.name.clone(), e.size, e.published_at))
+            .map(|e| (e.name.clone(), e.size))
             .collect();
-        self.index_json = report::index_json(&self.station, at, &files);
+        self.index_json = report::index_json(&self.station, &files);
     }
 }
 
