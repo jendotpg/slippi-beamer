@@ -72,6 +72,16 @@ pub fn index_json() -> Vec<u8> {
 
 pub fn forget_all() {
     {
+        let mut tracker = lock(&TRACKER);
+        if let Some(t) = tracker.as_mut() {
+            t.seen = Vec::new();
+            t.has_baseline = false;
+            t.pending_list = true;
+            t.ticks_since_list = 0;
+            t.stop_tracking();
+            GAME_LIVE.store(false, Ordering::Relaxed);
+        }
+
         let mut guard = lock(&SET);
         let Some(s) = guard.as_mut() else { return };
         s.clear();
@@ -139,7 +149,7 @@ fn run() {
 
 struct Tracker {
     sd: Option<Arc<SdCard>>,
-    seen: Vec<u32>,
+    seen: Vec<u64>,
     has_baseline: bool,
     live: Option<String>,
     pending_peek: bool,
@@ -236,7 +246,7 @@ impl Tracker {
             }
         };
 
-        let mut hashes: Vec<u32> = Vec::new();
+        let mut hashes: Vec<u64> = Vec::with_capacity(self.seen.len());
         let mut fresh: Vec<String> = Vec::new();
         let known = &self.seen;
         let walk = window.for_each_replay(REPLAY_CAP.load(Ordering::Relaxed), |name| {
@@ -289,8 +299,13 @@ impl Tracker {
         }
 
         let mut finished: Vec<(String, u64)> = Vec::new();
+        let mut bad = false;
         for name in &fresh {
             let Some(game) = peek(&window, name) else {
+                bad = true;
+                if let Ok(i) = self.seen.binary_search(&hash(name)) {
+                    self.seen.remove(i);
+                }
                 continue;
             };
             if game.live {
@@ -309,6 +324,8 @@ impl Tracker {
                                       // sami singles fox dittos can actually be thta fast...
             finished.push((name.clone(), size_of(&window, name)));
         }
+
+        warnings::set(WarningLabel::SlpMisformat, bad);
 
         drop(window);
         for (name, size) in finished {
@@ -385,11 +402,11 @@ fn size_of(window: &ReadWindow, name: &str) -> u64 {
         .unwrap_or(0)
 }
 
-fn hash(s: &str) -> u32 {
-    let mut h: u32 = 0x811c_9dc5;
+fn hash(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.as_bytes() {
-        h ^= *b as u32;
-        h = h.wrapping_mul(0x0100_0193);
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     h
 }

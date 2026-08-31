@@ -227,6 +227,7 @@ Hold the button on the side of the board while plugging it in to enter download 
 | `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.             |
 | `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served. Delete some.                        |
 | `NO WII`        | Nothing has read this drive in ten seconds — a charger, a dead port, or a console that never mounted it. |
+| `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.      |
 | `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.                    |
 
 ### A warning about FAT cache
@@ -293,7 +294,7 @@ The main memory constraint is the largest free block, not the number of free byt
 | mDNS per-packet buffer,`MALLOC_CAP_INTERNAL`                                                |                   <=1,460 B | every multicast on the network                    |
 | FatFs long-filename working buffer                                                          |                       512 B | every`f_open`, `f_opendir`, `f_readdir`, `f_stat` |
 | `vfs_fat_dir_t` for a directory walk                                                        |                      ~330 B | per listing                                       |
-| The scan tick's name-hash vector                                                            |        <=8,192 B contiguous | per listing                                       |
+| The scan tick's name-hash vector - the last walk's and the one being built are both live    |  <=16,384 B contiguous each | two per listing                                   |
 | An`OsString` per directory entry                                                            |                       ~40 B | × file count, per listing                         |
 | `GET /status` — the JSON body plus the error array                                          |    <=7,000 B in many pieces | per request                                       |
 

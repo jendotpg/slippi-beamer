@@ -54,13 +54,15 @@ pub enum WarningLabel {
     DriveFailing,
     DriveFull,
     NoHost,
+    SlpMisformat,
     DriveFilling,
 }
 
-pub const WARNINGS: [WarningLabel; 4] = [
+pub const WARNINGS: [WarningLabel; 5] = [
     WarningLabel::DriveFailing,
     WarningLabel::DriveFull,
     WarningLabel::NoHost,
+    WarningLabel::SlpMisformat,
     WarningLabel::DriveFilling,
 ];
 
@@ -70,6 +72,7 @@ impl WarningLabel {
             WarningLabel::DriveFailing => "DRIVE FAILING",
             WarningLabel::DriveFull => "DRIVE FULL",
             WarningLabel::NoHost => "NO WII",
+            WarningLabel::SlpMisformat => "SLP MISFORMAT",
             WarningLabel::DriveFilling => "DRIVE FILLING",
         }
     }
@@ -79,6 +82,7 @@ impl WarningLabel {
             WarningLabel::DriveFailing => "cannot read the card -- replays are still recorded",
             WarningLabel::DriveFull => "new replays are not served -- delete some",
             WarningLabel::NoHost => "nothing has read this drive -- check the USB port",
+            WarningLabel::SlpMisformat => "a replay will not parse -- it is not served",
             WarningLabel::DriveFilling => "delete replays from the card soon",
         }
     }
