@@ -517,8 +517,8 @@ fn check_partition(sd: &SdCard) {
         }
         Partition::TooBig { sectors } => {
             let detail = format!(
-                "the partition is {} GB; a Beamer volume may be at most 16 GiB",
-                sectors / (2 * 1024 * 1024),
+                "the partition is {} MB; a Beamer volume may be at most 4 GiB",
+                sectors / 2048,
             );
             errors::error(
                 Target::Session,
@@ -527,7 +527,7 @@ fn check_partition(sd: &SdCard) {
                 &[
                     "this card is partitioned larger than a Beamer supports",
                     &detail,
-                    "repartition it to 16 GB or smaller; see the README",
+                    "repartition it to 4 GB or smaller; see the README",
                 ],
             );
         }
@@ -539,7 +539,7 @@ fn check_partition(sd: &SdCard) {
                 &[
                     "no FAT32 partition on this card",
                     "exFAT, GPT and unpartitioned cards all look like this",
-                    "format it MS-DOS (FAT32), 16 GB or smaller; see the README",
+                    "format it MS-DOS (FAT32), 4 GB or smaller; see the README",
                 ],
             );
         }

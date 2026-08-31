@@ -7,14 +7,13 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 Major TODOs still:
 
 1. some measure of "how long has the set been going" on
-2. make /SLIPPI/ index work like /status (i.e. only refresh on POST, just show the default on GET)
-3. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
-4. get replay reporter up to date!
-5. provide a way to update config files OTA
+2. provide a way to update config files OTA
    1. TO custom idle message (to say bo5, stadium frozen, etc) - this can be config time, just updated OTA
 
-6. colorblind mode? amber > blue, perhaps?
-7. support other boards with different pinouts! different build options, maybe?
+3. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
+4. get replay reporter up to date!
+5. colorblind mode? amber > blue, perhaps?
+6. support other boards with different pinouts! different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
 ## Configuring a station
@@ -61,7 +60,7 @@ Download `beamer.bin` from the [latest release](<sorry, this>) (TODO: this. sorr
 
 Then per station:
 
-1. Insert a microSD card, formatted as (FAT32) with a first partition of 16 GB or smaller. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`. A card that is exFAT, unpartitioned, or partitioned larger than 16 GiB shows `WRONG FORMAT` on the screen — see [Card size](#card-size).
+1. Insert a microSD card, formatted as (FAT32) with a first partition of 4GB or smaller. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`. A card that is exFAT, unpartitioned, or partitioned larger than 4GB shows `WRONG FORMAT` on the screen — see [Card size](#card-size).
 2. Put the dongle into download mode and flash it. Hold the button on the side of the board down while you plug it into your laptop, then let go. Flash the firmware onto it:
 
    ```bash
@@ -209,7 +208,7 @@ Hold the button on the side of the board while plugging it in to enter download 
 | `NO ID`         | The board's factory MAC is unset or all zeroes. Refusing to boot.                                         |
 | `NO SD CARD`    | The card slot came up empty, or no card responded.                                                        |
 | `SD UNREADABLE` | A card is present but its filesystem will not mount.                                                      |
-| `WRONG FORMAT`  | A card is readable, but has no FAT32 partition or one over 16 GiB.                                        |
+| `WRONG FORMAT`  | A card is readable, but has no FAT32 partition or a first partition over 4 GB.                            |
 | `NO CONFIG`     | `CONFIG/config.txt` could not be read.                                                                    |
 | `BAD CONFIG`    | The file was read and rejected. The detail line names the bad key.                                        |
 | `NO USB`        | The USB stack would not start. The station halts. (A host that simply never reads is`NO WII`, a warning.) |

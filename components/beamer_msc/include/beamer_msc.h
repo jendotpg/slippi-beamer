@@ -128,7 +128,7 @@ extern "C"
         uint8_t type;
     } beamer_part_t;
 
-#define BEAMER_MAX_VOLUME_SECTORS (16u * 1024u * 1024u * 1024u / 512u)
+#define BEAMER_MAX_VOLUME_SECTORS (4u * 1024u * 1024u * 2u)
 
     void beamer_msc_set_visible(uint32_t sectors);
 
