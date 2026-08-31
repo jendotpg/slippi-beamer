@@ -40,6 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 SCHEMA = 1
 DEFAULT_SERVED = 10
 DEFAULT_CAP = 512
+CHUNK = 8 * 1024
 
 
 # A port of beamer::slp (src/slp.rs)
@@ -431,6 +432,7 @@ class Station:
         self.station_id = args.station or str(uuid.uuid5(uuid.NAMESPACE_DNS, args.name))
         self.station_name = args.station_name or ""
         self.lock = threading.Lock()
+        self.replay_requests = 0
         self.port_sig = None
         self.character_sig = None
         self.port_change_at = None
@@ -583,6 +585,24 @@ class Handler(BaseHTTPRequestHandler):
 
         self.send_error_json(403 if path == "/" else 404, "no such endpoint")
 
+    def parse_range(self, total):
+        """`bytes=N-` only, matching the firmware. Returns a start offset,
+        None for no Range, or "bad" for anything unsatisfiable."""
+        raw = self.headers.get("Range")
+        if raw is None:
+            return None
+        spec = raw.strip()
+        if not spec.startswith("bytes="):
+            return "bad"
+        start = spec[len("bytes=") :].strip()
+        if not start.endswith("-"):
+            return "bad"
+        try:
+            n = int(start[:-1])
+        except ValueError:
+            return "bad"
+        return n if 0 <= n < total else "bad"
+
     def serve_replay(self, name):
         if not SAFE_NAME.match(name) or not self.station.args.replays:
             self.send_error_json(404, "no such replay")
@@ -597,11 +617,73 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             self.send_error_json(500, "could not read that replay")
             return
-        self.send_response(200)
+
+        total = len(body)
+        start = self.parse_range(total)
+        if start == "bad":
+            self.send_response(416)
+            self.send_header("Content-Range", f"bytes */{total}")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        ranged = start is not None
+        if not ranged:
+            start = 0
+        body = body[start:]
+
+        self.station.replay_requests += 1
+        n = self.station.replay_requests
+        truncate = self.station.args.truncate_every
+        stall = self.station.args.stall_every
+
+        chunked = self.station.args.chunked
+        self.send_response(206 if ranged else 200)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Length", str(len(body)))
+        if chunked:
+            self.send_header("Transfer-Encoding", "chunked")
+        else:
+            self.send_header("Content-Length", str(len(body)))
+        self.send_header("Accept-Ranges", "bytes")
+        if ranged:
+            self.send_header("Content-Range", f"bytes {start}-{total - 1}/{total}")
         self.end_headers()
-        self.wfile.write(body)
+
+        if stall and n % stall == 0:
+            # a chunk, then nothing - the client's stall watchdog should fire
+            self.write_chunk(body[:CHUNK])
+            time.sleep(self.station.args.stall_seconds)
+            return
+        if truncate and n % truncate == 0:
+            # half a body under a full Content-Length, then hang up
+            # no terminating chunk: the body just stops, which is what a
+            # dropped link looks like
+            self.write_body(body[: len(body) // 2], last=False)
+            return
+        self.write_body(body)
+
+    def write_body(self, body, last=True):
+        """--rate exists so the byte-level progress and stall paths are
+        observable at all: on localhost a replay arrives in one gulp."""
+        rate = self.station.args.rate
+        per_chunk = CHUNK / (rate * 1024) if rate else 0
+        for i in range(0, len(body), CHUNK):
+            self.write_chunk(body[i : i + CHUNK])
+            if per_chunk:
+                time.sleep(per_chunk)
+        if last and self.station.args.chunked:
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+
+    def write_chunk(self, piece):
+        if self.station.args.chunked:
+            self.wfile.write(f"{len(piece):x}\r\n".encode())
+            self.wfile.write(piece)
+            self.wfile.write(b"\r\n")
+        else:
+            self.wfile.write(piece)
+        self.wfile.flush()
 
     def do_POST(self):
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
@@ -677,6 +759,42 @@ def main():
         'any warning reports result "warn"',
     )
     parser.add_argument("--unreported", action="store_true", help="503 on GET /status")
+    parser.add_argument(
+        "--truncate-every",
+        type=int,
+        default=0,
+        metavar="N",
+        help="hang up halfway through every Nth replay request, under a full "
+        "Content-Length - the silent-truncation case",
+    )
+    parser.add_argument(
+        "--stall-every",
+        type=int,
+        default=0,
+        metavar="N",
+        help="send one chunk then go quiet on every Nth replay request, to trip "
+        "the downloader's stall watchdog",
+    )
+    parser.add_argument(
+        "--chunked",
+        action="store_true",
+        help="stream replies chunked with no Content-Length, as the firmware "
+        "does - the shape that actually ships",
+    )
+    parser.add_argument(
+        "--rate",
+        type=float,
+        default=0,
+        metavar="KBPS",
+        help="throttle replay bodies to roughly this many KB/s, standing in "
+        "for a congested venue AP",
+    )
+    parser.add_argument(
+        "--stall-seconds",
+        type=float,
+        default=30.0,
+        help="how long --stall-every holds the connection open",
+    )
     parser.add_argument(
         "--post-delay",
         type=float,

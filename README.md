@@ -6,7 +6,7 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 Major TODOs still:
 
-1. get replay reporter up to date!
+1. why is there one replay file after reset?
 2. make button turn screen upside down!
 3. provide a way to update config files OTA
    1. TO custom idle message (to say bo5, stadium frozen, etc) - set it at config time!
