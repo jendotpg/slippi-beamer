@@ -6,17 +6,16 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 Major TODOs still:
 
-1. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
-2. get replay reporter up to date!
-3. provide a way to update config files OTA
+1. get replay reporter up to date!
+2. provide a way to update config files OTA
    1. TO custom idle message (to say bo5, stadium frozen, etc) - set it at config time!
    2. when updating config OTA, restart the beamers after update.
    3. is it possible to restart beamer dynamically after config file is written on laptop too?
       1. wait a few seconds,,, need to be able to correct typos ofc
 
-4. clean clippy LOL
-5. colorblind mode? amber > blue, perhaps?
-6. support other boards with different pinouts! different build options, maybe?
+3. clean clippy LOL
+4. colorblind mode? amber > blue, perhaps?
+5. support other boards with different pinouts! different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
 ## Configuring a station
@@ -59,22 +58,12 @@ The screen shows only the first error of the boot, with`+N more` beneath it when
 
 ## Setting up a new Beamer
 
-Download `beamer.bin` from the [latest release](<sorry, this>) (TODO: this. sorry. build it by hand for now - but more likely, just dm me LOL). If you built the firmware yourself, `espflash flash` writes it straight from the build and you can skip the download.
-
-Then per station:
-
-1. Insert a microSD card, formatted as (FAT32) with a first partition of 4GB or smaller. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`. A card that is exFAT, unpartitioned, or partitioned larger than 4GB shows `WRONG FORMAT` on the screen — see [Card size](#card-size).
-2. Put the dongle into download mode and flash it. Hold the button on the side of the board down while you plug it into your laptop, then let go. Flash the firmware onto it:
-
-   ```bash
-   espflash write-bin 0x0 beamer.bin
-   ```
-
-   1. Unplug and replug the dongle to leave download mode.
-
-3. Plug the Beamer into a laptop. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
+1. Insert a microSD card into the dongle formatted as FAT32 with a first partition of 4GB or smaller.
+   1. The microSD slot is INSIDE the usb jack! Remove the dummy card that comes inside to insert the new one.
+2. Hold the button on the side of the board dongle while you plug it into your laptop, then let go. Then press flash on [the flashing page](https://jendotpg.github.io/slippi-beamer/)
+   1. Unplug and replug the dongle to leave download mode. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`. A microSD card that is exFAT, unpartitioned, or partitioned larger than 4GB shows `WRONG FORMAT` on the screen — see [Card size](#card-size).
+3. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
    1. See [Configuring a station](#configuring-a-station) for more details on this file.
-
 4. Eject the Beamer and wait until the light and screen go dark.
 5. Plug the Beamer into a Wii and watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go!
    1. If it instead shows an error label in large text — and the LED starts blinking fast — that label is your diagnosis. [Error labels](#error-labels) says what each one means. The screen gives you one line of detail; for the full text, unplug the Beamer from the Wii, bring it back to your laptop, and read `LOGS/error.txt`.
@@ -319,13 +308,13 @@ The main memory constraint is the largest free block, not the number of free byt
 
 ### Releasing
 
-Pushing a `v*` tag will build the firmware in GitHub Actions and leaves a draft release carrying the `.bin`.
+Pushing a `v*` tag builds the firmware in GitHub Actions and leaves a draft release carrying `beamer.bin`.
 
 ```bash
 git tag v1.2.3 && git push origin v1.2.3
 ```
 
-**TODO: implement this!**
+This creates a draft, not a new release - go manually publish the draft in Github!
 
 ### Details
 

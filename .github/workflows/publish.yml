@@ -8,27 +8,51 @@ on:
 permissions:
   contents: write
 
+env:
+  ESPFLASH_VERSION: v4.5.0
+  ELF: target/xtensa-esp32s3-espidf/release/beamer
+
 jobs:
   build:
     runs-on: ubuntu-24.04
 
-    timeout-minutes: 350
+    timeout-minutes: 90
 
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v4
 
-      - name: Cache the pinned base image
+      - name: Make sdkconfig.defaults the newest file
+        run: touch sdkconfig.defaults
+
+      - name: Install the Xtensa Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: true
+
+      - name: Install espflash
+        run: |
+          curl -LO "https://github.com/esp-rs/espflash/releases/download/${ESPFLASH_VERSION}/espflash-x86_64-unknown-linux-gnu.zip"
+          unzip -j espflash-x86_64-unknown-linux-gnu.zip -d "$RUNNER_TEMP/bin"
+          chmod +x "$RUNNER_TEMP/bin/espflash"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Cache ESP-IDF
         uses: actions/cache@v4
         with:
-          path: image/.cache
-          key: base-image-${{ hashFiles('image/build/targets/*.conf') }}
+          path: ~/.espressif
+          key: espidf-${{ hashFiles('.cargo/config.toml', 'sdkconfig.defaults', 'Cargo.lock') }}
 
-      - name: Build the image
-        env:
-          BEAMER_USER_PASS: password
-          ASSET_BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
-        run: ./image/linux-build.sh armhf
+      - name: Cache cargo and the build directory
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build the firmware
+        run: cargo build --release
+
+      - name: Assemble beamer.bin
+        run: espflash save-image --chip esp32s3 --merge --skip-padding "$ELF" beamer.bin
 
       - name: Create draft release and upload artifacts
         env:
@@ -42,17 +66,15 @@ jobs:
               --title "$GITHUB_REF_NAME" \
               --notes ""
           fi
-          gh release upload "$GITHUB_REF_NAME" \
-            image/dist/beamer-*-armhf.img.xz \
-            image/dist/beamer-*-armhf.img.xz.meta \
-            image/dist/beamer.rpi-imager-manifest \
-            --clobber
+          gh release upload "$GITHUB_REF_NAME" beamer.bin --clobber
 
       - name: Upload artifacts to the run
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: image/dist/*
+          path: |
+            beamer.bin
+            ${{ env.ELF }}
           retention-days: 14
           if-no-files-found: warn

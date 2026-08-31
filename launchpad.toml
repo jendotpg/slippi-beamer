@@ -1,0 +1,10 @@
+esp_toml_version = 1.0
+
+multipart = true
+chip = "esp32s3"
+
+supported_apps = ["Slippi Beamer"]
+
+["Slippi Beamer"]
+image.esp32s3.parts = ["https://jendotpg.github.io/slippi-beamer/beamer.bin"]
+image.esp32s3.addresses = ["0x0"]
