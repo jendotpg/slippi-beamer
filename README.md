@@ -6,18 +6,17 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 Major TODOs still:
 
-1. remove "name" field from /SLIPPI/ index (it's useless...)
-2. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
-3. get replay reporter up to date!
-4. provide a way to update config files OTA
+1. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
+2. get replay reporter up to date!
+3. provide a way to update config files OTA
    1. TO custom idle message (to say bo5, stadium frozen, etc) - set it at config time!
    2. when updating config OTA, restart the beamers after update.
    3. is it possible to restart beamer dynamically after config file is written on laptop too?
       1. wait a few seconds,,, need to be able to correct typos ofc
 
-5. clean clippy LOL
-6. colorblind mode? amber > blue, perhaps?
-7. support other boards with different pinouts! different build options, maybe?
+4. clean clippy LOL
+5. colorblind mode? amber > blue, perhaps?
+6. support other boards with different pinouts! different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
 ## Configuring a station
@@ -140,7 +139,7 @@ Everything here is cached by the scan tick so this `GET` has minimal cost.`POST`
 
 ### `GET /SLIPPI/`
 
-Rendered when the set of published replays changes, never per request. There is no web root and nothing is copied — the index is a list of names, and the file is served straight off the card. Doesn't include a live game that hasn't been finished
+Rendered when the set of published replays changes, never per request. There is no web root and nothing is copied — the index is a list of URLs and the file is served straight off the card. Doesn't include a live game that hasn't been finished
 
 ```json
 {
@@ -149,7 +148,6 @@ Rendered when the set of published replays changes, never per request. There is 
   "served_replay_count": 2,
   "files": [
     {
-      "name": "Game_20260814T181203.slp",
       "size": 412393,
       "url": "/SLIPPI/Game_20260814T181203.slp"
     }

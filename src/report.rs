@@ -98,9 +98,8 @@ pub fn index_json(station_id: &str, files: &[(String, u64)]) -> Vec<u8> {
         if i > 0 {
             s.push(',');
         }
-        s.push_str("\n    {\"name\": \"");
-        escape_json_into(name, &mut s);
-        let _ = write!(s, "\", \"size\": {size}, \"url\": \"/SLIPPI/");
+        s.push_str("\n    {\"size\": ");
+        let _ = write!(s, "{size}, \"url\": \"/SLIPPI/");
         escape_json_into(name, &mut s);
         s.push_str("\"}");
     }

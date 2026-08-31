@@ -528,7 +528,6 @@ class Station:
                 continue
             files.append(
                 {
-                    "name": name,
                     "size": size,
                     "url": f"/SLIPPI/{name}",
                 }
