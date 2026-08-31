@@ -644,8 +644,9 @@ def advertise(name, port):
         ]
     if not shutil.which(cmd[0]):
         print(
-            f"fake-beamer: {cmd[0]} not found; serving HTTP but not advertising. "
-            f"Type the address into the app by hand.",
+            f"fake-beamer: {cmd[0]} not found; serving HTTP but not advertising, "
+            f"so the app will not see this station -- its fleet view is "
+            f"discovery-only.",
             file=sys.stderr,
         )
         return None

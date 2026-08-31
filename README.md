@@ -7,15 +7,16 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 Major TODOs still:
 
 1. get replay reporter up to date!
-2. provide a way to update config files OTA
+2. make button turn screen upside down!
+3. provide a way to update config files OTA
    1. TO custom idle message (to say bo5, stadium frozen, etc) - set it at config time!
    2. when updating config OTA, restart the beamers after update.
    3. is it possible to restart beamer dynamically after config file is written on laptop too?
       1. wait a few seconds,,, need to be able to correct typos ofc
 
-3. clean clippy LOL
-4. colorblind mode? amber > blue, perhaps?
-5. support other boards with different pinouts! different build options, maybe?
+4. clean clippy LOL
+5. colorblind mode? amber > blue, perhaps?
+6. support other boards with different pinouts! different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
 ## Configuring a station
