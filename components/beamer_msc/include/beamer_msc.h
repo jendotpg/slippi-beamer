@@ -90,6 +90,7 @@ extern "C"
 
     void beamer_msc_set_media(bool present);
     bool beamer_msc_media_present(void);
+    void beamer_msc_detach(void);
 
     void beamer_log_install(void);
     void beamer_log_push(const char *s, size_t n);

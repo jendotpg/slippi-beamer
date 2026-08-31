@@ -62,6 +62,7 @@ pub struct Detail {
 }
 
 static STATE: AtomicU8 = AtomicU8::new(State::Booting as u8);
+static PAINTED: AtomicU8 = AtomicU8::new(State::Booting as u8);
 static LED_GLOBAL: AtomicU8 = AtomicU8::new(crate::config::LedBrightness::DEFAULT.global());
 static DETAIL: Mutex<Option<Detail>> = Mutex::new(None);
 static GEN: AtomicU32 = AtomicU32::new(0);
@@ -81,6 +82,10 @@ pub fn set(state: State) {
 
 pub fn get() -> State {
     State::from_u8(STATE.load(Ordering::Relaxed))
+}
+
+pub fn painted() -> State {
+    State::from_u8(PAINTED.load(Ordering::Relaxed))
 }
 
 pub fn set_brightness(global: u8) {
@@ -265,6 +270,7 @@ fn render(pins: Pins) {
 
         last_state = Some(state);
         last_gen = gen;
+        PAINTED.store(state as u8, Ordering::Relaxed);
         std::thread::sleep(TICK);
     }
 }

@@ -559,6 +559,12 @@ bool beamer_msc_media_present(void)
     return atomic_load(&s_media_present);
 }
 
+void beamer_msc_detach(void)
+{
+    tud_disconnect();
+    ESP_LOGI(TAG, "detached from the bus");
+}
+
 int64_t beamer_msc_bind_time_us(void)
 {
     return s_bind_us;

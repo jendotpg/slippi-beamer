@@ -250,6 +250,7 @@ pub fn run() -> anyhow::Result<()> {
 
         if storage::msc::take_eject() {
             eject(&sd, &id);
+            shutdown();
             last = State::Off;
             last_activity = (false, false);
             status::set_activity(false, false);
@@ -358,6 +359,95 @@ fn eject(sd: &SdCard, id: &StationId) {
 }
 
 const HOST_GRACE: Duration = Duration::from_secs(10); // time until "NO WII" warning
+
+const EJECT_GRACE: Duration = Duration::from_secs(3);
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+const NET_DOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const DARK_TIMEOUT: Duration = Duration::from_secs(1);
+const POLL: Duration = Duration::from_millis(100);
+
+fn shutdown() {
+    if reloaded() {
+        log::info!("host reloaded the medium inside the grace window: staying up");
+        return;
+    }
+
+    drain();
+
+    if !net::shut_down(NET_DOWN_TIMEOUT) {
+        log::warn!(
+            "the net task did not stand down in {}s; sleeping anyway",
+            NET_DOWN_TIMEOUT.as_secs()
+        );
+    }
+    scan::park();
+
+    wait_dark();
+
+    storage::msc::detach();
+    std::thread::sleep(Duration::from_millis(50));
+
+    log::info!("shutdown complete: safe to unplug");
+    journal::persist_now();
+    deep_sleep();
+}
+
+fn reloaded() -> bool {
+    let start = std::time::Instant::now();
+    while start.elapsed() < EJECT_GRACE {
+        if storage::msc::take_load() {
+            return true;
+        }
+        std::thread::sleep(POLL);
+    }
+    false
+}
+
+fn drain() {
+    let start = std::time::Instant::now();
+    while net::transfers_in_flight() > 0 {
+        if start.elapsed() >= DRAIN_TIMEOUT {
+            log::warn!(
+                "{} transfer(s) still in flight after {}s; cutting them off",
+                net::transfers_in_flight(),
+                DRAIN_TIMEOUT.as_secs()
+            );
+            return;
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+fn wait_dark() {
+    let start = std::time::Instant::now();
+    while status::painted() != State::Off {
+        if start.elapsed() >= DARK_TIMEOUT {
+            log::warn!("the readout has not gone dark; sleeping anyway");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+const PIN_BACKLIGHT: i32 = 38;
+const PIN_LED_CLK: i32 = 39;
+const PIN_LED_DATA: i32 = 40;
+
+#[allow(unreachable_code)]
+fn deep_sleep() -> ! {
+    use esp_idf_svc::sys::{esp_deep_sleep_start, gpio_deep_sleep_hold_en, gpio_hold_en};
+
+    for pin in [PIN_BACKLIGHT, PIN_LED_CLK, PIN_LED_DATA] {
+        unsafe { gpio_hold_en(pin as _) };
+    }
+    unsafe { gpio_deep_sleep_hold_en() };
+
+    unsafe { esp_deep_sleep_start() };
+
+    loop {
+        std::thread::sleep(Duration::from_secs(60));
+    }
+}
 
 fn reset_reason() -> &'static str {
     journal::reset_name(unsafe { esp_idf_svc::sys::esp_reset_reason() })

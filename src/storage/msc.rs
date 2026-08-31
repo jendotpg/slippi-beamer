@@ -4,13 +4,14 @@ use crate::station::StationId;
 use std::ffi::CString;
 
 use esp_idf_svc::sys::{
-    beamer_msc_bind_time_us, beamer_msc_census, beamer_msc_eject_seen, beamer_msc_first_err,
-    beamer_msc_host_owns, beamer_msc_install, beamer_msc_last_cbw_us, beamer_msc_maxlun_asks,
-    beamer_msc_media_present, beamer_msc_mounted, beamer_msc_mounts, beamer_msc_reads_ok,
-    beamer_msc_set_media, beamer_msc_set_visible, beamer_msc_suspended, beamer_msc_take_dirty,
-    beamer_msc_take_eject, beamer_msc_take_load, beamer_msc_umounts, beamer_msc_unsup_t,
-    beamer_msc_unsupported, beamer_msc_writes_ok, beamer_wbc_dirty, beamer_wbc_flush_all,
-    beamer_wbc_high_water, beamer_wbc_set_policy, beamer_wbc_stalls, esp, EspError,
+    beamer_msc_bind_time_us, beamer_msc_census, beamer_msc_detach, beamer_msc_eject_seen,
+    beamer_msc_first_err, beamer_msc_host_owns, beamer_msc_install, beamer_msc_last_cbw_us,
+    beamer_msc_maxlun_asks, beamer_msc_media_present, beamer_msc_mounted, beamer_msc_mounts,
+    beamer_msc_reads_ok, beamer_msc_set_media, beamer_msc_set_visible, beamer_msc_suspended,
+    beamer_msc_take_dirty, beamer_msc_take_eject, beamer_msc_take_load, beamer_msc_umounts,
+    beamer_msc_unsup_t, beamer_msc_unsupported, beamer_msc_writes_ok, beamer_wbc_dirty,
+    beamer_wbc_flush_all, beamer_wbc_high_water, beamer_wbc_set_policy, beamer_wbc_stalls, esp,
+    EspError,
 };
 
 use super::SdCard;
@@ -127,6 +128,10 @@ pub fn set_media(present: bool) {
 
 pub fn media_present() -> bool {
     unsafe { beamer_msc_media_present() }
+}
+
+pub fn detach() {
+    unsafe { beamer_msc_detach() }
 }
 
 pub use esp_idf_svc::sys::{

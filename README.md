@@ -6,17 +6,16 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 Major TODOs still:
 
-1. stop serving on eject -> shutdown
-2. some measure of "how long has the set been going" on
-3. run status tick on reset-beamer, so that its updated
-4. make /SLIPPI/ index work like /status (i.e. only refresh on POST, just show the default on GET)
-5. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
-6. get replay reporter up to date!
-7. provide a way to update config files OTA
+1. some measure of "how long has the set been going" on
+2. run status tick on reset-beamer, so that its updated
+3. make /SLIPPI/ index work like /status (i.e. only refresh on POST, just show the default on GET)
+4. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
+5. get replay reporter up to date!
+6. provide a way to update config files OTA
    1. TO custom idle message (to say bo5, stadium frozen, etc) - this can be config time, just updated OTA
 
-8. colorblind mode? amber > blue, perhaps?
-9. support other boards with different pinouts! different build options, maybe?
+7. colorblind mode? amber > blue, perhaps?
+8. support other boards with different pinouts! different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
 ## Configuring a station
@@ -48,8 +47,10 @@ A Beamer's screen and LED are live readouts of station health. They are the fast
 | The station name, large. IP and how full the card is beneath it.     | Solid (**green**)                                    | Healthy and idle. Everything is on the card.                                      | yes             |
 | A warning label, large. One line of advice, then the station name.   | Slow even blink, about once a second (**green**)     | Working but with a warning.                                                       | yes             |
 | The error label, large. One line of detail, then where to read more. | Fast even blink, about five times a second (**red**) | Something went wrong (or this is a freshly flashed Beamer on its first boot).     | yes             |
-| Dark, backlight off                                                  | Dark                                                 | Beamer has been ejected and is finished.                                          | yes             |
+| Dark, backlight off                                                  | Dark                                                 | Ejected and shut down.                                                            | yes             |
 | Dark, backlight off                                                  | Solid (**red**)                                      | Stopped. It hit a fault it could not recover from. Unplug it and plug it back in. | yes             |
+
+**Ejecting a Beamer shuts it down for good.** It flushes the card, leaves the network, drops off the USB bus and sleeps. Unplugging and replugging it is the only way to bring it back.
 
 **An errored Beamer (Red LED, ERROR screen) generally acts like a regular USB drive.** Pull it using the same judgement you would as any other USB drive. It will still record games! (This is of course not true with`NO SD CARD`, `SD UNREADABLE`, `WRONG FORMAT`as there's no way to write the games)
 

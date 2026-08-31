@@ -3,7 +3,7 @@ pub mod http;
 pub mod mdns;
 pub mod wifi;
 
-use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,6 +28,8 @@ pub enum NetResult {
 static RESULT: AtomicU8 = AtomicU8::new(NetResult::Pending as u8);
 static IN_FLIGHT: AtomicU32 = AtomicU32::new(0);
 static TRANSFERS: AtomicU32 = AtomicU32::new(0);
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+static DOWN: AtomicBool = AtomicBool::new(false);
 
 pub fn result() -> NetResult {
     match RESULT.load(Ordering::Relaxed) {
@@ -43,7 +45,20 @@ fn set_result(r: NetResult) {
 }
 
 pub fn give_up() {
-    set_result(NetResult::Fail);
+    down(NetResult::Fail);
+}
+
+pub fn shut_down(timeout: Duration) -> bool {
+    SHUTDOWN.store(true, Ordering::Relaxed);
+
+    let start = std::time::Instant::now();
+    while !DOWN.load(Ordering::Relaxed) {
+        if start.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    true
 }
 
 pub fn transfers_in_flight() -> u32 {
@@ -142,28 +157,28 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
                 crate::status::ErrorLabel::NoWifi,
                 &["the system event loop would not start", &format!("{e}")],
             );
-            set_result(NetResult::Fail);
+            down(NetResult::Fail);
             return;
         }
     };
 
     if crate::errors::session_has_errors() {
         log::warn!("station is already in the error state: not bringing the network up");
-        set_result(NetResult::Fail);
+        down(NetResult::Fail);
         return;
     }
 
     let Some(join) = plan.join else {
         log::info!("no SSID configured: this station has no network");
         crate::status::set_net(crate::status::Net::NotSet);
-        set_result(NetResult::Offline);
+        down(NetResult::Offline);
         return;
     };
 
     let mut radio = match wifi::Radio::up(modem, sysloop, nvs, &plan.hostname, &join) {
         Ok(r) => r,
         Err(()) => {
-            set_result(NetResult::Fail);
+            down(NetResult::Fail);
             return;
         }
     };
@@ -212,9 +227,12 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
     }
 
     let mut since_tick = Duration::ZERO;
-    loop {
+    let ejected = loop {
+        if SHUTDOWN.load(Ordering::Relaxed) {
+            break true;
+        }
         if crate::errors::session_has_errors() {
-            break;
+            break false;
         }
         std::thread::sleep(RED_POLL);
 
@@ -223,9 +241,9 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
             since_tick = Duration::ZERO;
             radio.tick();
         }
-    }
+    };
 
-    stand_down(server, mdns, radio);
+    stand_down(server, mdns, radio, ejected);
 }
 
 const RED_POLL: Duration = Duration::from_millis(250);
@@ -236,17 +254,32 @@ fn stand_down(
     server: Option<esp_idf_svc::http::server::EspHttpServer<'static>>,
     mdns: Option<esp_idf_svc::mdns::EspMdns>,
     radio: wifi::Radio,
+    ejected: bool,
 ) {
-    log::warn!("station is red: standing down -- no HTTP, no discovery");
+    if ejected {
+        log::info!("ejected: standing down -- no HTTP, no discovery, no radio");
+    } else {
+        log::warn!("station is red: standing down -- no HTTP, no discovery");
+    }
 
     drop(server);
     drop(mdns);
     drop(radio);
 
     crate::status::set_net(crate::status::Net::Offline);
-    set_result(NetResult::Fail);
 
-    log::warn!("network down; the card is still recording");
+    if ejected {
+        down(NetResult::Offline);
+        log::info!("network down");
+    } else {
+        down(NetResult::Fail);
+        log::warn!("network down; the card is still recording");
+    }
+}
+
+fn down(r: NetResult) {
+    set_result(r);
+    DOWN.store(true, Ordering::Relaxed);
 }
 
 fn fail(label: crate::status::ErrorLabel, lines: &[&str]) {

@@ -29,6 +29,11 @@ const TICK: Duration = Duration::from_secs(1);
 static REPLAY_CAP: AtomicU32 = AtomicU32::new(crate::config::REPLAY_CAP_DEFAULT);
 const MAX_NEW: usize = 8;
 static GAME_LIVE: AtomicBool = AtomicBool::new(false);
+static PARKED: AtomicBool = AtomicBool::new(false);
+
+pub fn park() {
+    PARKED.store(true, Ordering::Relaxed);
+}
 
 pub fn game_live() -> bool {
     GAME_LIVE.load(Ordering::Relaxed)
@@ -105,6 +110,11 @@ pub fn spawn(sd: Arc<SdCard>, station: String, cap: usize, replay_cap: u32) -> a
 fn run() {
     loop {
         std::thread::sleep(TICK);
+
+        if PARKED.load(Ordering::Relaxed) {
+            log::info!("scan: parked");
+            return;
+        }
 
         let mut guard = lock(&TRACKER);
         let Some(t) = guard.as_mut() else { continue };
