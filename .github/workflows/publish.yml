@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Make sdkconfig.defaults the newest file
         run: touch sdkconfig.defaults
@@ -40,7 +40,7 @@ jobs:
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
       - name: Cache ESP-IDF
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.espressif
           key: espidf-${{ hashFiles('.cargo/config.toml', 'sdkconfig.defaults', 'Cargo.lock') }}
@@ -70,7 +70,7 @@ jobs:
 
       - name: Upload artifacts to the run
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: |
