@@ -152,6 +152,8 @@ struct Tracker {
     seen: Vec<u64>,
     has_baseline: bool,
     live: Option<String>,
+    port_sig: Option<u8>,
+    character_sig: Option<u32>,
     pending_peek: bool,
     ticks_since_peek: u32,
     pending_list: bool,
@@ -170,6 +172,8 @@ impl Tracker {
             seen: Vec::new(),
             has_baseline: false,
             live: None,
+            port_sig: None,
+            character_sig: None,
             pending_peek: false,
             ticks_since_peek: 0,
             pending_list: true, // the baseline listing, on the first tick
@@ -367,10 +371,22 @@ impl Tracker {
         }
     }
 
-    fn publish_game(&self, game: &slp::Game) {
+    fn publish_game(&mut self, game: &slp::Game) {
         GAME_LIVE.store(game.live, Ordering::Relaxed);
-        let mut f = lock(&FAST);
-        f.get_or_insert_with(report::Fast::default).game = Some(game.to_json());
+        let now = uptime_s();
+        let (ports, chars) = (game.port_sig(), game.character_sig());
+
+        let mut guard = lock(&FAST);
+        let f = guard.get_or_insert_with(report::Fast::default);
+        f.game = Some(game.to_json());
+        if self.port_sig != Some(ports) {
+            self.port_sig = Some(ports);
+            f.port_change_at = Some(now);
+        }
+        if self.character_sig != Some(chars) {
+            self.character_sig = Some(chars);
+            f.character_change_at = Some(now);
+        }
     }
 }
 

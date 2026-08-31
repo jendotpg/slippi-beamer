@@ -28,6 +28,8 @@ impl Health {
 pub struct Fast {
     pub replay_count: u32,
     pub game: Option<String>,
+    pub port_change_at: Option<u64>,
+    pub character_change_at: Option<u64>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -37,6 +39,7 @@ pub fn status_json(
     ssid: Option<&str>,
     fast: &Fast,
     replay_cap: u32,
+    now_s: u64,
     has_errors: bool,
     warnings: &[&str],
     net: Health,
@@ -67,6 +70,13 @@ pub fn status_json(
         }
         None => s.push_str("  \"game\": null,\n"),
     }
+    line_secs_since(&mut s, "secs_since_port_change", fast.port_change_at, now_s);
+    line_secs_since(
+        &mut s,
+        "secs_since_character_change",
+        fast.character_change_at,
+        now_s,
+    );
     line_str(&mut s, "health", Some(health.as_str()));
 
     s.push_str("  \"warnings\": ");
@@ -100,6 +110,17 @@ pub fn index_json(station_id: &str, files: &[(String, u64)]) -> Vec<u8> {
     }
     s.push_str("]\n}\n");
     s.into_bytes()
+}
+
+fn line_secs_since(out: &mut String, key: &str, at: Option<u64>, now_s: u64) {
+    match at {
+        Some(at) => {
+            let _ = writeln!(out, "  \"{key}\": {},", now_s.saturating_sub(at));
+        }
+        None => {
+            let _ = writeln!(out, "  \"{key}\": null,");
+        }
+    }
 }
 
 fn line_str(out: &mut String, key: &str, value: Option<&str>) {

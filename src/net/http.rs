@@ -191,6 +191,7 @@ fn status_body() -> String {
         id.ssid.as_deref(),
         &scan::fast(),
         scan::replay_cap(),
+        scan::uptime_s(),
         errors::session_has_errors(),
         &crate::warnings::labels(),
         match super::result() {

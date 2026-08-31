@@ -410,6 +410,19 @@ def peek(buf):
     return {"live": live, "ports": ports}
 
 
+def secs_since(at, now):
+    return None if at is None else int(now - at)
+
+
+def port_sig(game):
+    return tuple(p["port"] for p in game["ports"]) if game else None
+
+
+def character_sig(game):
+    # No costume: a colour swap is not a character change.
+    return tuple((p["port"], p["char_id"]) for p in game["ports"]) if game else None
+
+
 class Station:
     """The mutable half: what this station currently claims about itself."""
 
@@ -418,7 +431,26 @@ class Station:
         self.station_id = args.station or str(uuid.uuid5(uuid.NAMESPACE_DNS, args.name))
         self.station_name = args.station_name or ""
         self.lock = threading.Lock()
-        self.game = self.read_game()
+        self.port_sig = None
+        self.character_sig = None
+        self.port_change_at = None
+        self.character_change_at = None
+        self.game = None
+        self.set_game(self.read_game())
+
+    def set_game(self, game):
+        """What publish_game does: stamp the clocks when a signature changes."""
+        self.game = game
+        if game is None:
+            return
+        now = time.monotonic()
+        ports, chars = port_sig(game), character_sig(game)
+        if self.port_sig != ports:
+            self.port_sig = ports
+            self.port_change_at = now
+        if self.character_sig != chars:
+            self.character_sig = chars
+            self.character_change_at = now
 
     def read_game(self):
         """Peek at --game, the same way the scan tick does on a station."""
@@ -454,11 +486,14 @@ class Station:
     def refresh(self):
         """What POST /status does: re-run the checks."""
         with self.lock:
-            self.game = self.read_game()
+            self.set_game(self.read_game())
 
     def status(self):
         with self.lock:
             game = self.game
+            now = time.monotonic()
+            since_ports = secs_since(self.port_change_at, now)
+            since_chars = secs_since(self.character_change_at, now)
         return {
             "schema": SCHEMA,
             "arch": "fake",
@@ -469,6 +504,8 @@ class Station:
             "replay_cap": self.args.cap,
             "ssh": False,
             "game": game,
+            "secs_since_port_change": since_ports,
+            "secs_since_character_change": since_chars,
             "health": self.health(),
             "warnings": self.warnings(),
         }

@@ -314,6 +314,24 @@ pub fn peek_reader<R: std::io::Read>(mut r: R) -> std::io::Result<Result<Game, P
 }
 
 impl Game {
+    pub fn port_sig(&self) -> u8 {
+        let mut sig = 0u8;
+        for p in &self.ports {
+            sig |= 1 << (p.port - 1);
+        }
+        sig
+    }
+
+    pub fn character_sig(&self) -> u32 {
+        let mut sig = u32::MAX;
+        for p in &self.ports {
+            let slot = 8 * (p.port - 1) as u32;
+            let byte = p.char_id.unwrap_or(0xFE) as u32;
+            sig = (sig & !(0xFF << slot)) | (byte << slot);
+        }
+        sig
+    }
+
     pub fn to_json(&self) -> String {
         let mut s = String::with_capacity(256);
         let _ = write!(s, "{{\"live\":{},\"ports\":[", self.live);

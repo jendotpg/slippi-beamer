@@ -6,14 +6,18 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 Major TODOs still:
 
-1. some measure of "how long has the set been going" on
-2. provide a way to update config files OTA
-   1. TO custom idle message (to say bo5, stadium frozen, etc) - this can be config time, just updated OTA
+1. remove "name" field from /SLIPPI/ index (it's useless...)
+2. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
+3. get replay reporter up to date!
+4. provide a way to update config files OTA
+   1. TO custom idle message (to say bo5, stadium frozen, etc) - set it at config time!
+   2. when updating config OTA, restart the beamers after update.
+   3. is it possible to restart beamer dynamically after config file is written on laptop too?
+      1. wait a few seconds,,, need to be able to correct typos ofc
 
-3. Update CI . `.github/workflows/publish.yml` still builds and releases the `armhf` image and needs porting to `cargo build` + `espflash`
-4. get replay reporter up to date!
-5. colorblind mode? amber > blue, perhaps?
-6. support other boards with different pinouts! different build options, maybe?
+5. clean clippy LOL
+6. colorblind mode? amber > blue, perhaps?
+7. support other boards with different pinouts! different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
 ## Configuring a station
@@ -81,7 +85,7 @@ Then per station:
 
 | Item                        | Detail                                                                                                                                                                                                                                             | Where I Source Them                                                                                                                    |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| LilyGO T-Dongle-S3 with LCD | ESP32-S3 with 16 MB flash. Native 4-bit SDMMC, native USB OTG on a USB-A male plug, an addressable RGB status LED, a 0.96" 160×80 colour screen, and a transparent case. Get the variant with the screen if you can afford the extra dollar or so! | [www.ebay.com/itm/355074918615](https://www.ebay.com/itm/355074918615)                                                                 |
+| LilyGO T-Dongle-S3 with LCD | ESP32-S3 with 16 MB flash. Native 4-bit SDMMC, native USB OTG on a USB-A male plug, an addressable RGB status LED, a 0.96" 160×80 colour screen, and a transparent case. Get the variant with the screen if you can afford the extra dollar or so! | [www.amazon.com/dp/B0BK9162QY](https://www.amazon.com/dp/B0BK9162QY?lv=shuf&channelId=500&plpRedirect=mhFallback&th=1)                 |
 | microSD card                | Any size from 4 GB up, but format the replay partition to 4 GB with 4 KB clusters — see[Card size](#card-size).                                                                                                                                    | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793) |
 
 Depending on venue and size of fleet, you may need to buy a separate router as well - not all WiFi networks can handle an extra 20 devices and very few can handle an extra 80! I use [The GL.Inet Flint 2](https://www.gl-inet.com/en-us/products/gl-mt6000) (~$170 at time of writing). One thing to note: **ESP32-S3 is 2.4 GHz only.** Maybe sometime soon we'll see a company selling the ESP32-S31 in the dongle form factor and move over - 5 GHz and WiFi 6 would lowkey be a godsend...
@@ -114,7 +118,7 @@ Every station advertises `_beamer._tcp` on port 80 over mDNS, and the instance n
 
 ### `GET /status`
 
-Everything here is cached by the scan tick so this `GET` has minimal cost.`POST` the same URL to rescan on demand. `ssh` is always `false` on esp32; it is in the contract because a Pi genuinely can offer it. `game` is `null` until this station has watched a game start. `live` says whether the last replay is still being written, and `ports` carries the character, costume colour and nametag of each occupied port during the last recorded game. `replay_count` and `replay_cap` are meant to be read together: `replay_count / replay_cap` is how full the drive is, and `replay_count == replay_cap` means counting stopped there. `health` is `"ok"`, `"starting"`, `"warn"` or `"error"`. `"starting"` means the network has not finished coming up yet. `"warn"` means the `warnings` array is non-empty: the station is still theoretically recording, still serving and still safe to unplug, but something about it is off (usually the replay count is approaching cap or the Wii is failing to mount the Beamer).
+Everything here is cached by the scan tick so this `GET` has minimal cost.`POST` the same URL to rescan on demand. `ssh` is always `false` on esp32; it is in the contract because a Pi genuinely can offer it. `game` is `null` until this station has watched a game start. `live` says whether the last replay is still being written, and `ports` carries the character, costume colour and nametag of each occupied port during the last recorded game. `replay_count` and `replay_cap` are meant to be read together: `replay_count / replay_cap` is how full the drive is, and `replay_count == replay_cap` means counting stopped there. `secs_since_port_change` and `secs_since_character_change` give estimates for how long the set has been running: "how long have players been on these ports" and "how long have players been on these characters" (note that they're only updated when a game starts, so if players plug into the same ports you need to look at character change - but if one of the players is a known counterpicker you should look at ports! if new players plug into the same ports and play the same characters youre screwed.) `health` is `"ok"`, `"starting"`, `"warn"` or `"error"`. `"starting"` means the network has not finished coming up yet. `"warn"` means the `warnings` array is non-empty: the station is still theoretically recording, still serving and still safe to unplug, but something about it is off (usually the replay count is approaching cap or the Wii is failing to mount the Beamer).
 
 ```json
 {
@@ -127,6 +131,8 @@ Everything here is cached by the scan tick so this `GET` has minimal cost.`POST`
   "replay_cap": 512,
   "ssh": false,
   "game": null,
+  "secs_since_port_change": null,
+  "secs_since_character_change": null,
   "health": "ok",
   "warnings": []
 }
