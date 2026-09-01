@@ -4,16 +4,11 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. add a version tag to the status json
-   1. make it match the built version!
-   2. when building from cargo release, do it somehow else? idk?
-   3. make sure the READMEs (both here and in replay manager) are updated
-
-2. optimize download speeds :3
-3. support other boards with different pinouts? different build options, maybe?
+1. optimize download speeds :3
+2. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-4. colorblind mode? blue instead of amber?
+3. colorblind mode? blue instead of amber?
 
 ## Configuring a station
 
@@ -111,6 +106,7 @@ Everything here is cached by the scan tick so this `GET` has minimal cost.`POST`
 {
   "schema": 1,
   "arch": "esp32",
+  "firmware_version": "v0.2.2",
   "station_id": "3f2a...",
   "station_name": "stream station 2",
   "ssid": "nycmelee",

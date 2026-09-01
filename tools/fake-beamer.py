@@ -499,6 +499,7 @@ class Station:
         return {
             "schema": SCHEMA,
             "arch": "fake",
+            "firmware_version": "fake",
             "station_id": self.station_id,
             "station_name": self.station_name,
             "ssid": self.args.wifi,

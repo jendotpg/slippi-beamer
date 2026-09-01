@@ -1,9 +1,42 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::SystemTime;
 
 fn main() {
     guard_c_shim();
+    emit_version();
     embuild::espidf::sysenv::output();
+}
+
+fn emit_version() {
+    println!("cargo:rerun-if-env-changed=BEAMER_VERSION");
+    for path in [".git/HEAD", ".git/index"] {
+        if Path::new(path).exists() {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
+
+    let version = std::env::var("BEAMER_VERSION")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(git_describe)
+        .unwrap_or_else(|| {
+            let pkg = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+            format!("{pkg}-unknown")
+        });
+    println!("cargo:rustc-env=BEAMER_VERSION={}", version.trim());
+}
+
+fn git_describe() -> Option<String> {
+    let out = Command::new("git")
+        .args(["describe", "--tags", "--always", "--dirty"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let described = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (!described.is_empty()).then_some(described)
 }
 
 fn guard_c_shim() {

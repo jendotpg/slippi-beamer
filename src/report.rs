@@ -4,6 +4,7 @@ use crate::slp::escape_json_into;
 
 pub const ARCH: &str = "esp32";
 pub const SCHEMA: u32 = 1;
+pub const VERSION: &str = env!("BEAMER_VERSION");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Health {
@@ -55,6 +56,7 @@ pub fn status_json(
     s.push_str("{\n");
     let _ = writeln!(s, "  \"schema\": {SCHEMA},");
     let _ = writeln!(s, "  \"arch\": \"{ARCH}\",");
+    line_str(&mut s, "firmware_version", Some(VERSION));
 
     line_str(&mut s, "station_id", Some(station_id));
     line_str(&mut s, "station_name", Some(station_name));

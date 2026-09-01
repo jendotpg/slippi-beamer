@@ -10,6 +10,7 @@ permissions:
 
 env:
   ESPFLASH_VERSION: v4.5.0
+  BEAMER_VERSION: ${{ github.ref_name }}
   ELF: target/xtensa-esp32s3-espidf/release/beamer
 
 jobs:
