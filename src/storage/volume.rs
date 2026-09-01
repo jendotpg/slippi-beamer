@@ -138,6 +138,7 @@ fn wipe_inner(sd: &super::SdCard) -> Result<u32, String> {
         Ok(n)
     })();
 
+    msc::invalidate_all();
     msc::set_media(true);
     outcome
 }

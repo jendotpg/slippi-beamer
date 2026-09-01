@@ -10,8 +10,8 @@ use esp_idf_svc::sys::{
     beamer_msc_reads_ok, beamer_msc_set_media, beamer_msc_set_visible, beamer_msc_suspended,
     beamer_msc_take_dirty, beamer_msc_take_eject, beamer_msc_take_load, beamer_msc_umounts,
     beamer_msc_unsup_t, beamer_msc_unsupported, beamer_msc_writes_ok, beamer_wbc_dirty,
-    beamer_wbc_flush_all, beamer_wbc_high_water, beamer_wbc_set_policy, beamer_wbc_stalls, esp,
-    EspError,
+    beamer_wbc_flush_all, beamer_wbc_high_water, beamer_wbc_invalidate_all, beamer_wbc_set_policy,
+    beamer_wbc_stalls, esp, EspError,
 };
 
 use super::SdCard;
@@ -145,6 +145,10 @@ pub fn cache_dirty() -> u32 {
 
 pub fn flush_all() -> Result<(), EspError> {
     esp!(unsafe { beamer_wbc_flush_all() })
+}
+
+pub fn invalidate_all() {
+    unsafe { beamer_wbc_invalidate_all() }
 }
 
 pub fn set_policy(policy: esp_idf_svc::sys::beamer_wbc_policy_t) {

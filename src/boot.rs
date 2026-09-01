@@ -353,6 +353,7 @@ fn eject(sd: &SdCard, id: &StationId) {
         }
         Err(e) => log::warn!("eject: could not open the write window: {e}"),
     }
+    storage::msc::invalidate_all();
 
     status::set(State::Off);
     log::info!("eject complete: safe to unplug");

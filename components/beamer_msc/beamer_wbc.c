@@ -396,6 +396,22 @@ esp_err_t beamer_wbc_flush_all(void)
     return ESP_OK;
 }
 
+void beamer_wbc_invalidate_all(void)
+{
+    if (s_meta_lock == NULL)
+    {
+        return;
+    }
+
+    xSemaphoreTake(s_meta_lock, portMAX_DELAY);
+    for (int i = 0; i < WBC_SECTORS; i++)
+    {
+        mark_clean(i);
+        s_meta[i].valid = false;
+    }
+    xSemaphoreGive(s_meta_lock);
+}
+
 void beamer_wbc_set_policy(beamer_wbc_policy_t policy)
 {
     atomic_store(&s_policy, policy);
@@ -408,13 +424,7 @@ void beamer_wbc_set_policy(beamer_wbc_policy_t policy)
 
     if (policy != BEAMER_WBC_WRITEBACK)
     {
-        xSemaphoreTake(s_meta_lock, portMAX_DELAY);
-        for (int i = 0; i < WBC_SECTORS; i++)
-        {
-            mark_clean(i);
-            s_meta[i].valid = false;
-        }
-        xSemaphoreGive(s_meta_lock);
+        beamer_wbc_invalidate_all();
     }
     ESP_LOGI(TAG, "policy now %d", (int)policy);
 }

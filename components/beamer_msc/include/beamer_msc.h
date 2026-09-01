@@ -109,6 +109,7 @@ extern "C"
     esp_err_t beamer_wbc_write(uint32_t lba, const void *buf, size_t count);
     esp_err_t beamer_wbc_read(uint32_t lba, void *buf, size_t count);
     esp_err_t beamer_wbc_flush_all(void);
+    void beamer_wbc_invalidate_all(void);
 
     void beamer_wbc_set_policy(beamer_wbc_policy_t policy);
     beamer_wbc_policy_t beamer_wbc_policy(void);

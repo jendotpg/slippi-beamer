@@ -75,7 +75,7 @@ pub fn forget_all() {
         let mut tracker = lock(&TRACKER);
         if let Some(t) = tracker.as_mut() {
             t.seen = Vec::new();
-            t.has_baseline = false;
+            t.has_baseline = true;
             t.pending_list = true;
             t.ticks_since_list = 0;
             t.stop_tracking();
@@ -83,8 +83,9 @@ pub fn forget_all() {
         }
 
         let mut guard = lock(&SET);
-        let Some(s) = guard.as_mut() else { return };
-        s.clear();
+        if let Some(s) = guard.as_mut() {
+            s.clear();
+        }
     }
     let cap = replay_cap();
     warnings::set_fill(0, cap);

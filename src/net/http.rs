@@ -68,6 +68,9 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
         if super::transfers_in_flight() > 0 {
             return respond_json(req, 409, ERR_SERVING);
         }
+        if scan::game_live() {
+            return respond_json(req, 409, ERR_GAME_LIVE);
+        }
         match volume::wipe_replays(&reset_card) {
             Ok(n) => {
                 scan::forget_all();
@@ -253,6 +256,8 @@ const ERR_BUSY: &[u8] =
     br#"{"ok": false, "error": "another request is already running on this station"}"#;
 const ERR_SERVING: &[u8] =
     br#"{"ok": false, "error": "a replay is being served right now; retry once it finishes"}"#;
+const ERR_GAME_LIVE: &[u8] =
+    br#"{"ok": false, "error": "a game is being recorded right now; retry once it finishes"}"#;
 const ERR_CONFIRM: &[u8] = br#"{"ok": false, "error": "POST /reset-beamer needs the header 'X-Beamer-Confirm: reset'. It erases every replay on this station."}"#;
 
 fn error_body(msg: &str) -> String {

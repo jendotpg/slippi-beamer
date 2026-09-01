@@ -11,12 +11,12 @@ Major TODOs still:
 3. provide a way to update config files OTA
    1. TO custom idle message (to say bo5, stadium frozen, etc) - set it at config time!
    2. when updating config OTA, restart the beamers after update.
-   3. is it possible to restart beamer dynamically after config file is written on laptop too?
+   3. colorblind mode? amber > blue, perhaps?
+   4. is it possible to restart beamer dynamically after config file is written on laptop too?
       1. wait a few seconds,,, need to be able to correct typos ofc
 
 4. clean clippy LOL
-5. colorblind mode? amber > blue, perhaps?
-6. support other boards with different pinouts! different build options, maybe?
+5. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
 ## Configuring a station
