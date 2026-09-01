@@ -12,6 +12,7 @@ pub const REPLAY_CAP_MAX: u32 = 2048;
 pub const LED_PCT_DEFAULT: u8 = 20;
 pub const LED_PCT_MAX: u8 = 100;
 pub const DEBUG_DEFAULT: bool = false;
+pub const FLIP_SCREEN_DEFAULT: bool = false;
 
 const STRICT_FLAGS: bool = true;
 
@@ -274,6 +275,7 @@ pub struct Config {
     num_replays: ReplayCount,
     replay_cap: ReplayCap,
     led_brightness: LedBrightness,
+    flip_screen: bool,
     debug: bool,
 }
 
@@ -296,6 +298,10 @@ impl Config {
 
     pub fn led_brightness(&self) -> LedBrightness {
         self.led_brightness
+    }
+
+    pub fn flip_screen(&self) -> bool {
+        self.flip_screen
     }
 
     pub fn debug(&self) -> bool {
@@ -398,6 +404,14 @@ impl Config {
             }
         };
 
+        let flip_screen = match parse_flag("FLIP-SCREEN", raw.flip_screen.as_deref()) {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(e);
+                FLIP_SCREEN_DEFAULT
+            }
+        };
+
         let debug = match parse_flag("DEBUG", raw.debug.as_deref()) {
             Ok(v) => v,
             Err(e) => {
@@ -426,6 +440,7 @@ impl Config {
             num_replays,
             replay_cap,
             led_brightness,
+            flip_screen,
             debug,
         })
     }
@@ -474,6 +489,7 @@ struct Raw {
     num_replays: Option<String>,
     replay_cap: Option<String>,
     led_brightness: Option<String>,
+    flip_screen: Option<String>,
     debug: Option<String>,
 }
 
@@ -502,6 +518,7 @@ impl Raw {
                 "NUM-REPLAYS-SERVED" | "NUM_REPLAYS_SERVED" => raw.num_replays = Some(value),
                 "REPLAY-CAP" | "REPLAY_CAP" => raw.replay_cap = Some(value),
                 "LED-BRIGHTNESS" | "LED_BRIGHTNESS" => raw.led_brightness = Some(value),
+                "FLIP-SCREEN" | "FLIP_SCREEN" => raw.flip_screen = Some(value),
                 "DEBUG" => raw.debug = Some(value),
                 _ => {}
             }

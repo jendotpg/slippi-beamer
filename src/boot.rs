@@ -40,6 +40,7 @@ pub fn run() -> anyhow::Result<()> {
             clk: pins.gpio39,
             data: pins.gpio40,
         },
+        button: pins.gpio0,
         lcd: LcdPins {
             spi: p.spi2,
             sclk: pins.gpio5,
@@ -102,6 +103,7 @@ pub fn run() -> anyhow::Result<()> {
 
     let settings = Settings::from(&outcome);
     status::set_brightness(settings.led_global);
+    status::set_flipped(settings.flip_screen);
     if !settings.debug {
         journal::disable();
     }
@@ -268,6 +270,7 @@ struct Settings {
     num_replays: u8,
     replay_cap: u32,
     led_global: u8,
+    flip_screen: bool,
     debug: bool,
 }
 
@@ -279,12 +282,14 @@ impl Settings {
                 num_replays: cfg.num_replays(),
                 replay_cap: cfg.replay_cap(),
                 led_global: cfg.led_brightness().global(),
+                flip_screen: cfg.flip_screen(),
                 debug: cfg.debug(),
             },
             Outcome::Rejected(_) | Outcome::Unreadable(_) => Settings {
                 num_replays: config::KEEP_DEFAULT,
                 replay_cap: config::REPLAY_CAP_DEFAULT,
                 led_global: config::LedBrightness::default().global(),
+                flip_screen: config::FLIP_SCREEN_DEFAULT,
                 debug: config::DEBUG_DEFAULT,
             },
         }
@@ -697,6 +702,9 @@ const CONFIG_TEMPLATE: &str = "\
 #                    stops counting. 1 to 2048.
 # LED-BRIGHTNESS     0 to 100 percent. 0 turns the status LED off completely -
 #                    the screen then becomes the only readout.
+# FLIP-SCREEN        true or false - whether the screen starts rotated 180
+#                    degrees, for a Wii the Beamer plugs into upside down. The
+#                    button on the side flips it either way at any time.
 # DEBUG              true or false - whether to keep a LOGS/debug.txt of each
 #                    boot. Off by default. These files are never deleted.
 
@@ -708,5 +716,6 @@ STATION-NAME=
 NUM-REPLAYS-SERVED=10
 REPLAY-CAP=512
 LED-BRIGHTNESS=20
+FLIP-SCREEN=false
 DEBUG=false
 ";

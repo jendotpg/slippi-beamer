@@ -15,6 +15,7 @@ pub const H: u16 = 80;
 const X_GAP: u16 = 1;
 const Y_GAP: u16 = 26;
 const MADCTL: u8 = 0x60;
+const MADCTL_FLIPPED: u8 = MADCTL ^ 0xC0;
 const BACKLIGHT_ACTIVE_LOW: bool = true;
 const PCLK_HZ: u32 = 10_000_000; // deliberately slow - we barely animate...
 
@@ -557,6 +558,10 @@ impl<'d> Lcd<'d> {
         }
 
         self.blit(x0, y0, BOX, BOX);
+    }
+
+    pub fn set_flipped(&mut self, flipped: bool) {
+        self.cmd_data(MADCTL_CMD, &[if flipped { MADCTL_FLIPPED } else { MADCTL }]);
     }
 
     fn backlight(&mut self, on: bool) {

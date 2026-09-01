@@ -4,12 +4,14 @@ pub mod lcd;
 pub mod led;
 
 use std::net::Ipv4Addr;
-use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use esp_idf_svc::hal::cpu::Core;
-use esp_idf_svc::hal::gpio::{Gpio1, Gpio2, Gpio3, Gpio38, Gpio39, Gpio4, Gpio40, Gpio5};
+use esp_idf_svc::hal::gpio::{
+    Gpio0, Gpio1, Gpio2, Gpio3, Gpio38, Gpio39, Gpio4, Gpio40, Gpio5, Input, PinDriver, Pull,
+};
 use esp_idf_svc::hal::spi::{SPI2, SPI3};
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 
@@ -66,6 +68,7 @@ static PAINTED: AtomicU8 = AtomicU8::new(State::Booting as u8);
 static LED_GLOBAL: AtomicU8 = AtomicU8::new(crate::config::LedBrightness::DEFAULT.global());
 static DETAIL: Mutex<Option<Detail>> = Mutex::new(None);
 static GEN: AtomicU32 = AtomicU32::new(0);
+static FLIPPED: AtomicBool = AtomicBool::new(false);
 
 fn detail() -> MutexGuard<'static, Option<Detail>> {
     DETAIL.lock().unwrap_or_else(|e| e.into_inner())
@@ -90,6 +93,14 @@ pub fn painted() -> State {
 
 pub fn set_brightness(global: u8) {
     LED_GLOBAL.store(global, Ordering::Relaxed);
+}
+
+pub fn set_flipped(flipped: bool) {
+    FLIPPED.store(flipped, Ordering::Relaxed);
+}
+
+pub fn toggle_flipped() {
+    FLIPPED.fetch_xor(true, Ordering::Relaxed);
 }
 
 pub fn set_name(name: &str) {
@@ -135,6 +146,7 @@ pub(crate) fn set_warning(warn: Option<WarningLabel>, more: u32) {
 const TICK: Duration = Duration::from_millis(20);
 const BOOT_HALF_MS: u64 = 500; // ~1 Hz
 const ERROR_HALF_MS: u64 = 100; // ~5 Hz
+const DEBOUNCE_TICKS: u8 = 3; // 60 ms at TICK
 
 pub const SPINNER_STEPS: u64 = 12;
 
@@ -158,9 +170,43 @@ fn dots_frame(ms: u64) -> u64 {
     (ms / DOTS_MS) % DOTS_MAX + 1
 }
 
+struct Button<'d> {
+    pin: PinDriver<'d, Input>,
+    level: bool,
+    pending: u8,
+}
+
+impl<'d> Button<'d> {
+    fn new(pin: Gpio0<'static>) -> Result<Button<'d>, esp_idf_svc::sys::EspError> {
+        let pin: PinDriver<'_, Input> = PinDriver::input(pin, Pull::Up)?;
+        let level = pin.is_high();
+        Ok(Button {
+            pin,
+            level,
+            pending: 0,
+        })
+    }
+
+    fn pressed(&mut self) -> bool {
+        let now = self.pin.is_high();
+        if now == self.level {
+            self.pending = 0;
+            return false;
+        }
+        self.pending += 1;
+        if self.pending < DEBOUNCE_TICKS {
+            return false;
+        }
+        self.pending = 0;
+        self.level = now;
+        !now
+    }
+}
+
 pub struct Pins {
     pub led: LedPins,
     pub lcd: LcdPins,
+    pub button: Gpio0<'static>,
 }
 
 pub struct LedPins {
@@ -221,8 +267,17 @@ fn render(pins: Pins) {
         }
     };
 
+    let mut button = match Button::new(pins.button) {
+        Ok(button) => Some(button),
+        Err(e) => {
+            log::warn!("button unavailable, screen cannot be flipped by hand: {e}");
+            None
+        }
+    };
+
     let start = Instant::now();
     let mut local = Detail::default();
+    let mut applied_flip = false;
     let mut last_state: Option<State> = None;
     let mut last_gen = u32::MAX;
     let mut last_frame = u64::MAX;
@@ -240,8 +295,20 @@ fn render(pins: Pins) {
             );
         }
 
+        if button.as_mut().is_some_and(Button::pressed) {
+            toggle_flipped();
+        }
+
         if let Some(lcd) = panel.as_mut() {
-            if Some(state) != last_state || gen != last_gen {
+            let want_flip = FLIPPED.load(Ordering::Relaxed);
+            let turned = want_flip != applied_flip;
+            if turned {
+                log::info!("screen {}", if want_flip { "flipped" } else { "upright" });
+                lcd.set_flipped(want_flip);
+                applied_flip = want_flip;
+            }
+
+            if Some(state) != last_state || gen != last_gen || turned {
                 if let Some(d) = detail().as_ref() {
                     local.clone_from(d);
                 }

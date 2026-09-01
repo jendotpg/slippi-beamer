@@ -1,21 +1,19 @@
 # Slippi Beamer
 
-## THIS IS A WIP!
+I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have confirmed both can report sets succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi) (although the raspi firmware is now quite out of date...)
 
-I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have confirmed both can report sets succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi).
+## TODO:
 
-Major TODOs still:
+1. add a version tag to the status json
+   1. make it match the built version!
+   2. when building from cargo release, do it somehow else? idk?
+   3. make sure the READMEs (both here and in replay manager) are updated
 
-1. make button turn screen upside down!
-2. provide a way to update config files OTA
-   1. TO custom idle message (to say bo5, stadium frozen, etc) - set it at config time!
-   2. when updating config OTA, restart the beamers after update.
-   3. colorblind mode? amber > blue, perhaps?
-   4. is it possible to restart beamer dynamically after config file is written on laptop too?
-      1. wait a few seconds,,, need to be able to correct typos ofc
-
+2. optimize download speeds :3
 3. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
+
+4. colorblind mode? blue instead of amber?
 
 ## Configuring a station
 
@@ -31,11 +29,12 @@ Major TODOs still:
 | `NUM-REPLAYS-SERVED` | `10`           | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                   |
 | `REPLAY-CAP`         | `512`          | How many replays the station counts on the card before it stops counting. 1 to 2048. Past 75% it warns; at the cap it warns and stops serving new replays. |
 | `LED-BRIGHTNESS`     | `20`           | The status LED, 0 to 100 percent.                                                                                                                          |
+| `FLIP-SCREEN`        | `false`        | Whether the screen starts rotated 180 degrees. The button on the side of the dongle flips it either way at any time.                                       |
 | `DEBUG`              | `false`        | Whether to keep a`LOGS/debug.txt` of each boot. Off means the journal records nothing at all. These files are never deleted automatically.                 |
 
 ## Status Readout
 
-A Beamer's screen and LED are live readouts of station health. They are the fastest way — and usually the only way — to tell whether a Beamer is actually working.
+A Beamer's screen and LED are live readouts of station health. They are the fastest way — and usually the only way — to tell whether a Beamer is actually working. If the screen is upside down, press the button on the side of the dongle. You can configure this in `config.txt` if you want it to remember after a reboot.
 
 **Amber means something is happening — DO NOT UNPLUG.**
 
