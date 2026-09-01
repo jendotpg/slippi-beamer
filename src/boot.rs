@@ -152,7 +152,7 @@ pub fn run() -> anyhow::Result<()> {
     let mut reloader = reload::Watcher::new(raw_config, settings, plan.clone());
     if let Err(e) = net::spawn(p.modem, nvs, sd.clone(), plan) {
         errors::error(
-            Target::Session,
+            Target::Late,
             ErrorLabel::NoWifi,
             "net",
             &["the network task would not start", &format!("{e}")],
@@ -254,7 +254,7 @@ pub fn run() -> anyhow::Result<()> {
 
         if storage::msc::take_eject() {
             eject(&sd, &id);
-            shutdown();
+            shutdown(&sd, &id);
             last = State::Off;
             last_activity = (false, false);
             status::set_activity(false, false);
@@ -314,26 +314,24 @@ fn eject(sd: &SdCard, id: &StationId) {
     status::set_activity(true, false);
     status::set(State::Busy);
 
-    if let Err(e) = storage::msc::flush_all() {
+    if let Err(e) = flush_fully() {
+        let detail = format!("{} sector(s) still dirty: {e}", storage::msc::cache_dirty());
         errors::error(
             Target::Late,
             ErrorLabel::SdUnreadable,
             "sd",
-            &["could not flush the write cache on eject", &format!("{e}")],
+            &[
+                "could not flush the write cache on eject",
+                &detail,
+                "the medium stays present in case the host reloads it",
+            ],
         );
         return;
     }
 
     journal::persist_now();
     storage::msc::set_media(false);
-
-    match WriteWindow::open(sd) {
-        Ok(window) => {
-            errors::mirror(BASE_PATH, &id.to_string());
-            drop(window);
-        }
-        Err(e) => log::warn!("eject: could not open the write window: {e}"),
-    }
+    mirror_in_window(sd, id);
     storage::msc::invalidate_all();
 
     status::set(State::Off);
@@ -343,12 +341,15 @@ fn eject(sd: &SdCard, id: &StationId) {
 const HOST_GRACE: Duration = Duration::from_secs(10); // time until "NO WII" warning
 
 const EJECT_GRACE: Duration = Duration::from_secs(3);
+const FLUSH_TIMEOUT: Duration = Duration::from_secs(30);
+const FLUSH_RETRY: Duration = Duration::from_millis(20);
+
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 const NET_DOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const DARK_TIMEOUT: Duration = Duration::from_secs(1);
 const POLL: Duration = Duration::from_millis(100);
 
-fn shutdown() {
+fn shutdown(sd: &SdCard, id: &StationId) {
     if reloaded() {
         log::info!("host reloaded the medium inside the grace window: staying up");
         return;
@@ -364,6 +365,8 @@ fn shutdown() {
     }
     scan::park();
 
+    flush_before_sleep(sd, id);
+
     wait_dark();
 
     storage::msc::detach();
@@ -372,6 +375,49 @@ fn shutdown() {
     log::info!("shutdown complete: safe to unplug");
     journal::persist_now();
     deep_sleep();
+}
+
+fn mirror_in_window(sd: &SdCard, id: &StationId) {
+    match WriteWindow::open(sd) {
+        Ok(window) => {
+            errors::mirror(BASE_PATH, &id.to_string());
+            drop(window);
+        }
+        Err(e) => log::warn!("could not open a write window to mirror: {e}"),
+    }
+}
+
+fn flush_before_sleep(sd: &SdCard, id: &StationId) {
+    let dirty = storage::msc::cache_dirty();
+    if dirty == 0 {
+        return;
+    }
+
+    log::warn!("{dirty} sector(s) still dirty: retrying before sleep");
+    status::set_activity(true, false);
+    status::set(State::Busy);
+
+    if let Err(e) = flush_fully() {
+        let detail = format!("{} sector(s) lost: {e}", storage::msc::cache_dirty());
+        errors::error(
+            Target::Late,
+            ErrorLabel::SdUnreadable,
+            "sd",
+            &[
+                "slept with sectors the card never took",
+                &detail,
+                "copy the replays off this card before reusing it",
+            ],
+        );
+        return;
+    }
+
+    log::info!("flush: the card took the rest of the cache");
+    storage::msc::set_media(false);
+    mirror_in_window(sd, id);
+    storage::msc::invalidate_all();
+    status::set_activity(false, false);
+    status::set(State::Off);
 }
 
 fn reloaded() -> bool {
@@ -393,14 +439,40 @@ fn restart() -> ! {
     net::shut_down(NET_DOWN_TIMEOUT);
     scan::park();
 
-    if let Err(e) = storage::msc::flush_all() {
-        log::warn!("could not flush the cache before the restart: {e}");
+    if let Err(e) = flush_fully() {
+        log::warn!(
+            "could not flush the cache before the restart: {} sector(s) lost: {e}",
+            storage::msc::cache_dirty(),
+        );
     }
     journal::persist_now();
     storage::msc::detach();
     std::thread::sleep(Duration::from_millis(50));
 
     unsafe { esp_idf_svc::sys::esp_restart() }
+}
+
+fn flush_fully() -> Result<(), esp_idf_svc::sys::EspError> {
+    let start = std::time::Instant::now();
+    let mut last = storage::msc::cache_dirty();
+
+    loop {
+        match storage::msc::flush_all() {
+            Ok(()) => return Ok(()),
+            Err(e) if start.elapsed() >= FLUSH_TIMEOUT => {
+                log::error!("flush: giving up after {}s", FLUSH_TIMEOUT.as_secs());
+                return Err(e);
+            }
+            Err(e) => {
+                let dirty = storage::msc::cache_dirty();
+                if dirty != last {
+                    log::warn!("flush: retrying, {dirty} sector(s) left ({e})");
+                    last = dirty;
+                }
+                std::thread::sleep(FLUSH_RETRY);
+            }
+        }
+    }
 }
 
 fn drain() {
@@ -703,7 +775,7 @@ const CONFIG_TEMPLATE: &str = "\
 # FLIP-SCREEN        true or false - whether the screen starts rotated 180
 #                    degrees, for a Wii the Beamer plugs into upside down. The
 #                    button on the side flips it either way at any time.
-# DEBUG              true or false - whether to keep a LOGS/debug.txt of each
+# DEBUG              true or false - whether to keep a LOGS/debug_N.txt of each
 #                    boot. Off by default. These files are never deleted.
 
 SSID=

@@ -3,7 +3,7 @@
 //! bind get [`Target::Late`] and are put in NVS.
 //!
 //! During the boot process, init() below rotates the previous sessions Late
-//! errors off of NVS and onto the disk at LOGS/error.txt
+//! errors off of NVS and onto the disk at LOGS/error.txt.
 use std::sync::{Mutex, MutexGuard};
 
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
@@ -162,7 +162,7 @@ pub fn session_has_errors() -> bool {
 }
 
 fn have_errors(s: &Store) -> bool {
-    !s.prev.is_empty() || !s.session.is_empty()
+    !s.prev.is_empty() || !s.session.is_empty() || !s.late.is_empty()
 }
 
 pub fn mirror(base: &str, station_id: &str) {
@@ -185,6 +185,7 @@ pub fn mirror(base: &str, station_id: &str) {
         body.push('\n');
     }
     body.push_str(&s.session);
+    body.push_str(&s.late);
     body.push_str(EXPLANATION);
     drop(s);
 
@@ -201,7 +202,7 @@ Fix CONFIG/config.txt on this drive and save it. The station picks the file up
 and restarts itself if the fix is one it cannot apply while running.
 There is no need to eject - ejecting shuts the station down for good.
 
-This file is always one boot behind. The LED and the screen are not: if the
+This file can be up to one boot behind. The LED and the screen never are: if the
 LED is SOLID and the screen shows this station's name, the station is working
 right now!
 ";

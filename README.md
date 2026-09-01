@@ -4,30 +4,28 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. fix error.txt not getting written sometimes (i think its when its `Late`? triage this...)
-2. rename the first debug to `debug_1.txt` - I'm getting weird sorts rn...
-3. optimize download speeds :3
-4. support other boards with different pinouts? different build options, maybe?
+1. optimize download speeds :3
+2. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-5. colorblind mode? blue instead of amber?
+3. colorblind mode? blue instead of amber?
 
 ## Configuring a station
 
 `CONFIG/config.txt` on the `BEAMER` drive is the only thing a TO ever edits. The Beamer reads it in full at every boot and again after you edit it. Keys are case-insensitive, blank lines and `#` comments are ignored, and values may be quoted.
 
-| Key                  | Default        | What it does                                                                                                                                               |
-| -------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SSID`               | blank          | The network to join.**Blank means this station has no network.**                                                                                           |
-| `PASSWORD`           | blank          | 8–63 characters. Blank means an open network.                                                                                                              |
-| `COUNTRY`            | `US`           | Two-letter regulatory domain:`US`, `CA`, `JP`, `GB`...                                                                                                     |
-| `HIDDEN`             | `false`        | Whether the network broadcasts its name.                                                                                                                   |
-| `STATION-NAME`       | the station ID | What to call this station. Appears as`station_name` in `GET /status`, and as the station's hostname (slugged - see [Station Identity](#station-identity)). |
-| `NUM-REPLAYS-SERVED` | `10`           | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                   |
-| `REPLAY-CAP`         | `512`          | How many replays the station counts on the card before it stops counting. 1 to 2048. Past 75% it warns; at the cap it warns and stops serving new replays. |
-| `LED-BRIGHTNESS`     | `20`           | The status LED, 0 to 100 percent.                                                                                                                          |
-| `FLIP-SCREEN`        | `false`        | Whether the screen starts rotated 180 degrees. The button on the side of the dongle flips it either way at any time.                                       |
-| `DEBUG`              | `false`        | Whether to keep a`LOGS/debug.txt` of each boot. Off means the journal records nothing at all. These files are never deleted automatically.                 |
+| Key                  | Default        | What it does                                                                                                                                                                |
+| -------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SSID`               | blank          | The network to join.**Blank means this station has no network.**                                                                                                            |
+| `PASSWORD`           | blank          | 8–63 characters. Blank means an open network.                                                                                                                               |
+| `COUNTRY`            | `US`           | Two-letter regulatory domain:`US`, `CA`, `JP`, `GB`...                                                                                                                      |
+| `HIDDEN`             | `false`        | Whether the network broadcasts its name.                                                                                                                                    |
+| `STATION-NAME`       | the station ID | What to call this station. Appears as`station_name` in `GET /status`, and as the station's hostname (slugged - see [Station Identity](#station-identity)).                  |
+| `NUM-REPLAYS-SERVED` | `10`           | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                                    |
+| `REPLAY-CAP`         | `512`          | How many replays the station counts on the card before it stops counting. 1 to 2048. Past 75% it warns; at the cap it warns and stops serving new replays.                  |
+| `LED-BRIGHTNESS`     | `20`           | The status LED, 0 to 100 percent.                                                                                                                                           |
+| `FLIP-SCREEN`        | `false`        | Whether the screen starts rotated 180 degrees. The button on the side of the dongle flips it either way at any time.                                                        |
+| `DEBUG`              | `false`        | Whether to keep a`LOGS/debug_0001.txt` of each boot, numbered upward from there. Off means the journal records nothing at all. These files are never deleted automatically. |
 
 ## Status Readout
 
@@ -227,34 +225,34 @@ Everything else — serving replays over HTTP, counting files, peeking at the ga
 
 ### Boot phases
 
-| Phase                      | What                                                                                                                                                                                                                |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ClaimIdentity`            | eFuse base MAC becomes a UUIDv5. Refuse to boot on an all-zero MAC. Spawn the status task, so the LED lights at once.                                                                                               |
-| `MountCard`                | `sdmmc_host_init`, 4-bit bus, probe the card.                                                                                                                                                                       |
-| `PrepareForBind`           | **The write window.** Mount FatFs read-write, read `CONFIG/config.txt`, rotate the error state, mirror `LOGS/error.txt`, write `LOGS/debug.txt` if `DEBUG` is set, seed a template `config.txt` if absent, unmount. |
-| `BindCard`                 | Present the card to the host as a USB drive.                                                                                                                                                                        |
-| `StartJournal`             | The journal drain, the read window, the scan tick.                                                                                                                                                                  |
-| `EstablishNetworkServices` | WiFi,`esp_http_server`, mDNS `_beamer._tcp` on 80.                                                                                                                                                                  |
-| `Running`                  | The verdict loop. The boot is over.                                                                                                                                                                                 |
+| Phase                      | What                                                                                                                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ClaimIdentity`            | eFuse base MAC becomes a UUIDv5. Refuse to boot on an all-zero MAC. Spawn the status task, so the LED lights at once.                                                                                                          |
+| `MountCard`                | `sdmmc_host_init`, 4-bit bus, probe the card.                                                                                                                                                                                  |
+| `PrepareForBind`           | **The write window.** Mount FatFs read-write, read `CONFIG/config.txt`, rotate the error state, mirror `LOGS/error.txt`, write the next `LOGS/debug_N.txt` if `DEBUG` is set, seed a template `config.txt` if absent, unmount. |
+| `BindCard`                 | Present the card to the host as a USB drive.                                                                                                                                                                                   |
+| `StartJournal`             | The journal drain, the read window, the scan tick.                                                                                                                                                                             |
+| `EstablishNetworkServices` | WiFi,`esp_http_server`, mDNS `_beamer._tcp` on 80.                                                                                                                                                                             |
+| `Running`                  | The verdict loop. The boot is over.                                                                                                                                                                                            |
 
 ### Memory
 
-The main memory constraint is the largest free block, not the number of free bytes. Both numbers are logged, at boot, when the network comes up, in every periodic journal summary, and beside any mount failure. They arrive as `heap: N B free, largest block M B` in `LOGS/debug.txt`, when `DEBUG` is set. A healthy station settles around 60 KB free, and the gap between the two figures is the fragmentation. The journal summary also carries the smallest that the largest free block ever got:`low water K B.`
+The main memory constraint is the largest free block, not the number of free bytes. Both numbers are logged, at boot, when the network comes up, in every periodic journal summary, and beside any mount failure. They arrive as `heap: N B free, largest block M B` in `LOGS/debug_N.txt`, when `DEBUG` is set. A healthy station settles around 60 KB free, and the gap between the two figures is the fragmentation. The journal summary also carries the smallest that the largest free block ever got:`low water K B.`
 
 #### Allocated statically at link time
 
-| Consumer                   |      Bytes |                                                                                                   |
-| -------------------------- | ---------: | ------------------------------------------------------------------------------------------------- |
-| `beamer_wbc.c` `s_data`    |     32,768 | the write-back cache: 64 sectors of 512 B                                                         |
-| `beamer_wbc.c` `s_staging` |      8,192 | one flush run, DMA'd straight out of`.bss`                                                        |
-| `beamer_msc.c` `s_ring`    |      8,192 | 512 transfer timings, the CBW→CSW census                                                          |
-| `beamer_log.c` `s_ring`    |      8,192 | the`esp_log` capture that becomes `LOGS/debug.txt`. Static - `DEBUG=false` does not give it back. |
-| `lcd.rs` `SCRATCH`         |      7,680 | one 160×24 band of the panel, so rendering never allocates                                        |
-| `http.rs` `SEND_BUF`       |      8,192 | the replay read chunk — see below                                                                 |
-| TinyUSB`_mscd_epbuf`       |      4,096 | `CFG_TUD_MSC_EP_BUFSIZE`                                                                          |
-| `beamer_wbc.c` `s_meta`    |        768 | 64 slot descriptors                                                                               |
-| everything else            |     ~2,000 | descriptors, fonts, the Shift-JIS table, scalars                                                  |
-| **Total**                  | **~80 KB** |                                                                                                   |
+| Consumer                   |      Bytes |                                                                                                     |
+| -------------------------- | ---------: | --------------------------------------------------------------------------------------------------- |
+| `beamer_wbc.c` `s_data`    |     32,768 | the write-back cache: 64 sectors of 512 B                                                           |
+| `beamer_wbc.c` `s_staging` |      8,192 | one flush run, DMA'd straight out of`.bss`                                                          |
+| `beamer_msc.c` `s_ring`    |      8,192 | 512 transfer timings, the CBW→CSW census                                                            |
+| `beamer_log.c` `s_ring`    |      8,192 | the`esp_log` capture that becomes `LOGS/debug_N.txt`. Static - `DEBUG=false` does not give it back. |
+| `lcd.rs` `SCRATCH`         |      7,680 | one 160×24 band of the panel, so rendering never allocates                                          |
+| `http.rs` `SEND_BUF`       |      8,192 | the replay read chunk — see below                                                                   |
+| TinyUSB`_mscd_epbuf`       |      4,096 | `CFG_TUD_MSC_EP_BUFSIZE`                                                                            |
+| `beamer_wbc.c` `s_meta`    |        768 | 64 slot descriptors                                                                                 |
+| everything else            |     ~2,000 | descriptors, fonts, the Shift-JIS table, scalars                                                    |
+| **Total**                  | **~80 KB** |                                                                                                     |
 
 #### Allocated once at boot
 
@@ -293,7 +291,7 @@ The main memory constraint is the largest free block, not the number of free byt
 | Open files per mount    | 2                                        | `MAX_FILES` in `storage/fat.rs`                                                                                                                     |
 | Concurrent HTTP sockets | 4                                        | `esp_http_server`, 192 B of state each. It is one task, so handlers run one at a time and only one send queue is ever full                          |
 | TCP send window         | 23,040 B                                 | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT`; window/RTT is the download ceiling, so this is what sets it. `CONFIG_LWIP_TCP_WND_DEFAULT` stays at 5,760        |
-| Write-back cache        | 64 sectors                               | `WBC_SECTORS`; `high water` and `stalls` in `LOGS/debug.txt` say whether it is enough                                                               |
+| Write-back cache        | 64 sectors                               | `WBC_SECTORS`; `high water` and `stalls` in `LOGS/debug_N.txt` say whether it is enough                                                             |
 | Replays served          | 16                                       | `NUM-REPLAYS-SERVED` ceiling                                                                                                                        |
 | Replays counted         | `REPLAY-CAP`, default 512, ceiling 2,048 | `replay_count` saturates at `replay_cap`, both reported in `GET /status`                                                                            |
 | Error text kept         | 2,048 B per store                        | then truncated                                                                                                                                      |

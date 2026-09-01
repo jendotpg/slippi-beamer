@@ -83,7 +83,7 @@ impl Watcher {
             for e in problems {
                 let [head, detail] = e.lines();
                 errors::error(
-                    Target::Session,
+                    Target::Late,
                     ErrorLabel::BadConfig,
                     "config",
                     &[head, detail],

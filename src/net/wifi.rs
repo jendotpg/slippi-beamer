@@ -265,5 +265,5 @@ fn truncating<const N: usize>(s: &str) -> heapless::String<N> {
 }
 
 fn fail(label: ErrorLabel, lines: &[&str]) {
-    crate::errors::error(crate::errors::Target::Session, label, "net", lines);
+    crate::errors::error(crate::errors::Target::Late, label, "net", lines);
 }

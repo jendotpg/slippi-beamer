@@ -1,5 +1,5 @@
 //! The journal: divided into the **MSC timing ring**  and the **console log**
-//! Both rotate on boot and come back as sections of `LOGS/debug.txt` on the
+//! Both rotate on boot and come back as sections of `LOGS/debug_N.txt` on the
 //! next boot. beamer_msc.c (in the hot path) writes into the ring, but does
 //! no formatting or any compute work - this is where the expensive part is
 //! done on a low priority.

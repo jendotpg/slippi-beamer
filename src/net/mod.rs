@@ -339,5 +339,5 @@ fn down(r: NetResult) {
 }
 
 fn fail(label: crate::status::ErrorLabel, lines: &[&str]) {
-    crate::errors::error(crate::errors::Target::Session, label, "net", lines);
+    crate::errors::error(crate::errors::Target::Late, label, "net", lines);
 }

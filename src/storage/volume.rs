@@ -8,8 +8,8 @@ fn next_name(dir: &str) -> String {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) => {
-            log::warn!("could not list {DIR}/, overwriting {STEM}.txt: {e}");
-            return format!("{STEM}.txt");
+            log::warn!("could not list {DIR}/, overwriting {STEM}_0001.txt: {e}");
+            return format!("{STEM}_0001.txt");
         }
     };
 
@@ -32,10 +32,7 @@ fn next_name(dir: &str) -> String {
         highest = highest.max(n);
     }
 
-    match highest {
-        0 => format!("{STEM}.txt"),
-        n => format!("{STEM}_{}.txt", n + 1),
-    }
+    format!("{STEM}_{:04}.txt", highest + 1)
 }
 
 pub fn write_debug(base: &str, _window: &WriteWindow, station_id: &str, reset: &str) {
