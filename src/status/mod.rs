@@ -143,8 +143,8 @@ pub const DOTS_MAX: u64 = 3;
 
 fn led_bright(state: State, ms: u64) -> bool {
     match state {
-        State::Booting | State::Warning => (ms / BOOT_HALF_MS) % 2 == 0,
-        State::Error => (ms / ERROR_HALF_MS) % 2 == 0,
+        State::Booting | State::Warning => (ms / BOOT_HALF_MS).is_multiple_of(2),
+        State::Error => (ms / ERROR_HALF_MS).is_multiple_of(2),
         // Solid, in their own colours. `Off` never reads this.
         State::Idle | State::Busy | State::Off => true,
     }

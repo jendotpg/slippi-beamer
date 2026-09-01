@@ -59,7 +59,7 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
 
     let reset_card = card.clone();
     server.fn_handler::<anyhow::Error, _>("/reset-beamer", Method::Post, move |req| {
-        if req.header("X-Beamer-Confirm").as_deref() != Some("reset") {
+        if req.header("X-Beamer-Confirm") != Some("reset") {
             return respond_json(req, 400, ERR_CONFIRM);
         }
         let Ok(_guard) = API_LOCK.try_lock() else {
@@ -172,7 +172,7 @@ where
         }
     };
 
-    let range = parse_range(req.header("Range").as_deref());
+    let range = parse_range(req.header("Range"));
     let ranged = matches!(range, RangeReq::From(_));
     let start = match range {
         RangeReq::None => 0,

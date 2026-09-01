@@ -698,7 +698,7 @@ fn heap_now() -> (u32, u32) {
     };
     let free = unsafe { esp_idf_svc::sys::esp_get_free_heap_size() };
     let largest =
-        unsafe { heap_caps_get_largest_free_block((MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) as u32) };
+        unsafe { heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) };
     (free, largest as u32)
 }
 
@@ -952,9 +952,9 @@ impl log::Log for Logger {
             buf: [0; 192],
             len: 0,
         };
-        let _ = write!(
+        let _ = writeln!(
             line,
-            "{marker} ({ms}) {}: {}\n",
+            "{marker} ({ms}) {}: {}",
             record.target(),
             record.args()
         );
