@@ -16,6 +16,7 @@ use esp_idf_svc::wifi::{
 
 use crate::status::{self, ErrorLabel, Net};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Join {
     pub ssid: String,
     pub password: Option<String>,
@@ -44,14 +45,38 @@ impl Radio {
                 &["the WiFi driver would not initialise", &e.to_string()],
             )
         })?;
-        let mut wifi = BlockingWifi::wrap(wifi, sysloop).map_err(|e| {
+        let wifi = BlockingWifi::wrap(wifi, sysloop).map_err(|e| {
             fail(
                 ErrorLabel::NoWifi,
                 &["the WiFi event wrapper would not start", &e.to_string()],
             )
         })?;
 
-        set_hostname(&mut wifi, hostname);
+        let mut radio = Radio {
+            wifi,
+            ssid: String::new(),
+        };
+        radio.associate(hostname, join)?;
+        Ok(radio)
+    }
+
+    pub fn rejoin(&mut self, hostname: &str, join: &Join) -> Result<(), ()> {
+        log::info!("re-joining: {:?} -> {:?}", self.ssid, join.ssid);
+        status::set_net(Net::Offline);
+
+        if let Err(e) = self.wifi.disconnect() {
+            log::warn!("disconnect before re-join: {e}");
+        }
+        if let Err(e) = self.wifi.stop() {
+            log::warn!("stop before re-join: {e}");
+        }
+
+        self.associate(hostname, join)
+    }
+
+    fn associate(&mut self, hostname: &str, join: &Join) -> Result<(), ()> {
+        self.ssid = join.ssid.clone();
+        set_hostname(&mut self.wifi, hostname);
 
         let auth = match &join.password {
             None => AuthMethod::None,
@@ -68,7 +93,8 @@ impl Radio {
             },
             ..Default::default()
         };
-        wifi.set_configuration(&Configuration::Client(conf))
+        self.wifi
+            .set_configuration(&Configuration::Client(conf))
             .map_err(|e| {
                 fail(
                     ErrorLabel::NoWifi,
@@ -76,7 +102,7 @@ impl Radio {
                 )
             })?;
 
-        wifi.start().map_err(|e| {
+        self.wifi.start().map_err(|e| {
             fail(
                 ErrorLabel::NoWifi,
                 &["the radio would not start", &e.to_string()],
@@ -92,7 +118,7 @@ impl Radio {
             join.ssid,
             if join.hidden { "hidden" } else { "broadcast" }
         );
-        wifi.connect().map_err(|e| {
+        self.wifi.connect().map_err(|e| {
             fail(
                 ErrorLabel::NoWifi,
                 &[
@@ -116,6 +142,7 @@ impl Radio {
             }
         }
 
+        let wifi = &self.wifi;
         wifi.ip_wait_while(|| wifi.is_up().map(|up| !up), Some(DHCP_TIMEOUT))
             .map_err(|e| {
                 fail(
@@ -127,7 +154,7 @@ impl Radio {
                 )
             })?;
 
-        let ip = current_ip(&wifi).ok_or_else(|| {
+        let ip = current_ip(&self.wifi).ok_or_else(|| {
             fail(
                 ErrorLabel::NoIp,
                 &["associated, but the interface reports no address"],
@@ -139,11 +166,7 @@ impl Radio {
             join.ssid
         );
         status::set_net(Net::Up(ip));
-
-        Ok(Radio {
-            wifi,
-            ssid: join.ssid.clone(),
-        })
+        Ok(())
     }
 
     pub fn tick(&mut self) {

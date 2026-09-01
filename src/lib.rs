@@ -10,6 +10,7 @@ mod errors;
 mod journal;
 mod net;
 mod panic;
+mod reload;
 mod scan;
 mod status;
 mod storage;

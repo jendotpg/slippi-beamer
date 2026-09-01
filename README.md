@@ -4,15 +4,17 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. optimize download speeds :3
-2. support other boards with different pinouts? different build options, maybe?
+1. fix error.txt not getting written sometimes (i think its when its `Late`? triage this...)
+2. rename the first debug to `debug_1.txt` - I'm getting weird sorts rn...
+3. optimize download speeds :3
+4. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-3. colorblind mode? blue instead of amber?
+5. colorblind mode? blue instead of amber?
 
 ## Configuring a station
 
-`CONFIG/config.txt` on the `BEAMER` drive is the only thing a TO ever edits. The Beamer reads it in full at every boot. Keys are case-insensitive, blank lines and `#` comments are ignored, and values may be quoted.
+`CONFIG/config.txt` on the `BEAMER` drive is the only thing a TO ever edits. The Beamer reads it in full at every boot and again after you edit it. Keys are case-insensitive, blank lines and `#` comments are ignored, and values may be quoted.
 
 | Key                  | Default        | What it does                                                                                                                                               |
 | -------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -58,10 +60,7 @@ The screen shows only the first error of the boot, with`+N more` beneath it when
 3. Unplug and replug the dongle to leave download mode. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`. A microSD card that is exFAT, unpartitioned, or partitioned larger than 4GB shows `WRONG FORMAT` on the screen — see [Card size](#card-size).
 4. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
    1. See [Configuring a station](#configuring-a-station) for more details on this file.
-5. Eject the Beamer and wait until the light and screen go dark.
-6. Plug the Beamer into a Wii and watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go!
-   1. If it instead shows an error label in large text — and the LED starts blinking fast — that label is your diagnosis. [Error labels](#error-labels) says what each one means. The screen gives you one line of detail; for the full text, unplug the Beamer from the Wii, bring it back to your laptop, and read `LOGS/error.txt`.
-   2. Note that `error.txt` is from the LAST session! If you update and replug directly into the laptop without trying on a Wii in between, watch the screen instead — there will still be an `error.txt` and it will be describing the previous boot, not the current one!
+   2. Watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go! If it goes red and shows an error label, diagnose with the [Error labels](#error-labels) table. Note that the error is from LAST boot - and editing the config while an error shows causes a reboot! I know these semantics are a little confusing... sorry....
 
 ## Hardware
 

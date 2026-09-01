@@ -7,14 +7,14 @@ use std::time::Duration;
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 
-use crate::config::Outcome;
+use crate::config::{Outcome, Settings};
 use crate::errors::{self, Target};
 use crate::journal::{self, Phase};
 use crate::station::StationId;
 use crate::status::{self, ErrorLabel, LcdPins, LedPins, Pins, State, WarningLabel};
 use crate::storage::fat::{WriteWindow, BASE_PATH};
 use crate::storage::{self, volume, Partition, SdCard};
-use crate::{net, scan, station, warnings};
+use crate::{net, reload, scan, station, warnings};
 
 pub fn run() -> anyhow::Result<()> {
     // --- Set up process --------------------------------------------------
@@ -99,7 +99,7 @@ pub fn run() -> anyhow::Result<()> {
 
     // --- PrepareForBind --------------------------------------------------
     journal::mark(Phase::PrepareForBind);
-    let outcome = write_window(&sd, &id);
+    let (outcome, raw_config) = write_window(&sd, &id);
 
     let settings = Settings::from(&outcome);
     status::set_brightness(settings.led_global);
@@ -147,7 +147,9 @@ pub fn run() -> anyhow::Result<()> {
     // --- EstablishNetworkServices ----------------------------------------
     journal::mark(Phase::EstablishNetworkServices);
 
-    let plan = net::Plan::from(&outcome, &id.to_string());
+    let station_id = id.to_string();
+    let plan = net::Plan::from(&outcome, &station_id);
+    let mut reloader = reload::Watcher::new(raw_config, settings, plan.clone());
     if let Err(e) = net::spawn(p.modem, nvs, sd.clone(), plan) {
         errors::error(
             Target::Session,
@@ -262,37 +264,11 @@ pub fn run() -> anyhow::Result<()> {
             log::info!("host reloaded the medium");
         }
 
-        std::thread::sleep(Duration::from_millis(250));
-    }
-}
-
-struct Settings {
-    num_replays: u8,
-    replay_cap: u32,
-    led_global: u8,
-    flip_screen: bool,
-    debug: bool,
-}
-
-impl Settings {
-    fn from(outcome: &Outcome) -> Settings {
-        use crate::config;
-        match outcome {
-            Outcome::Applied(cfg) => Settings {
-                num_replays: cfg.num_replays(),
-                replay_cap: cfg.replay_cap(),
-                led_global: cfg.led_brightness().global(),
-                flip_screen: cfg.flip_screen(),
-                debug: cfg.debug(),
-            },
-            Outcome::Rejected(_) | Outcome::Unreadable(_) => Settings {
-                num_replays: config::KEEP_DEFAULT,
-                replay_cap: config::REPLAY_CAP_DEFAULT,
-                led_global: config::LedBrightness::default().global(),
-                flip_screen: config::FLIP_SCREEN_DEFAULT,
-                debug: config::DEBUG_DEFAULT,
-            },
+        if reloader.poll(&sd, &station_id, is_writing) == reload::Action::Restart {
+            restart();
         }
+
+        std::thread::sleep(Duration::from_millis(250));
     }
 }
 
@@ -407,6 +383,24 @@ fn reloaded() -> bool {
         std::thread::sleep(POLL);
     }
     false
+}
+
+fn restart() -> ! {
+    log::info!("reload: restarting to pick up the new config");
+    status::set(State::Busy);
+
+    drain();
+    net::shut_down(NET_DOWN_TIMEOUT);
+    scan::park();
+
+    if let Err(e) = storage::msc::flush_all() {
+        log::warn!("could not flush the cache before the restart: {e}");
+    }
+    journal::persist_now();
+    storage::msc::detach();
+    std::thread::sleep(Duration::from_millis(50));
+
+    unsafe { esp_idf_svc::sys::esp_restart() }
 }
 
 fn drain() {
@@ -561,7 +555,7 @@ fn check_partition(sd: &SdCard) {
     }
 }
 
-fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
+fn write_window(sd: &SdCard, id: &StationId) -> (Outcome, Vec<u8>) {
     let window = match WriteWindow::open(sd) {
         Ok(w) => w,
         Err(e) => {
@@ -575,7 +569,7 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
                     &detail,
                 ],
             );
-            return Outcome::unreadable(detail);
+            return (Outcome::unreadable(detail), Vec::new());
         }
     };
 
@@ -585,9 +579,9 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
     log::info!("volume seeded");
 
     let path = format!("{BASE_PATH}/CONFIG/config.txt");
-    let outcome = match std::fs::read(&path) {
-        Ok(bytes) => Outcome::parse_bytes(&bytes),
-        Err(e) => Outcome::unreadable(format!("{e}")),
+    let (outcome, raw) = match std::fs::read(&path) {
+        Ok(bytes) => (Outcome::parse_bytes(&bytes), bytes),
+        Err(e) => (Outcome::unreadable(format!("{e}")), Vec::new()),
     };
 
     let station_id = id.to_string();
@@ -647,7 +641,7 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
     drop(window);
     log::info!("write window closed");
 
-    outcome
+    (outcome, raw)
 }
 
 fn seed_volume() {
@@ -684,7 +678,11 @@ const CONFIG_TEMPLATE: &str = "\
 # Beamer station configuration.
 #
 # Fill this in, save, eject this drive, then move the cable back to the Wii.
-# The Beamer reads this file at every boot.
+#
+# The Beamer reads this file at every boot and again after every edit  - so
+# a station that is already running will pick up an edit on its own, 
+# restarting itself if there was an error. DEBUG is the one key read at 
+# boot only - there's no way to turn it on without a manual reboot.
 #
 # Until SSID is filled in, this station has no network. That is expected.
 # After a reboot, if LOGS/error.txt exists it says what went wrong. The

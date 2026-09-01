@@ -197,7 +197,9 @@ pub fn mirror(base: &str, station_id: &str) {
 }
 
 const EXPLANATION: &str = "
-Fix CONFIG/config.txt on this drive, eject it, and plug it back in.
+Fix CONFIG/config.txt on this drive and save it. The station picks the file up 
+and restarts itself if the fix is one it cannot apply while running.
+There is no need to eject - ejecting shuts the station down for good.
 
 This file is always one boot behind. The LED and the screen are not: if the
 LED is SOLID and the screen shows this station's name, the station is working

@@ -478,6 +478,36 @@ impl Outcome {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Settings {
+    pub num_replays: u8,
+    pub replay_cap: u32,
+    pub led_global: u8,
+    pub flip_screen: bool,
+    pub debug: bool,
+}
+
+impl Settings {
+    pub fn from(outcome: &Outcome) -> Settings {
+        match outcome {
+            Outcome::Applied(cfg) => Settings {
+                num_replays: cfg.num_replays(),
+                replay_cap: cfg.replay_cap(),
+                led_global: cfg.led_brightness().global(),
+                flip_screen: cfg.flip_screen(),
+                debug: cfg.debug(),
+            },
+            Outcome::Rejected(_) | Outcome::Unreadable(_) => Settings {
+                num_replays: KEEP_DEFAULT,
+                replay_cap: REPLAY_CAP_DEFAULT,
+                led_global: LedBrightness::DEFAULT.global(),
+                flip_screen: FLIP_SCREEN_DEFAULT,
+                debug: DEBUG_DEFAULT,
+            },
+        }
+    }
+}
+
 // --- scanning -------------------------------------------------------------
 #[derive(Debug, Default)]
 struct Raw {

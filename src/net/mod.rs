@@ -4,7 +4,7 @@ pub mod mdns;
 pub mod wifi;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
@@ -85,6 +85,7 @@ impl Drop for Transfer {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     pub join: Option<wifi::Join>,
     pub hostname: String,
@@ -124,6 +125,16 @@ impl Plan {
             },
         }
     }
+}
+
+static PENDING: Mutex<Option<Plan>> = Mutex::new(None);
+
+pub fn reconfigure(plan: Plan) {
+    *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(plan);
+}
+
+fn take_pending() -> Option<Plan> {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
 pub fn spawn(
@@ -194,7 +205,7 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         }
     };
 
-    let mdns = match mdns::advertise(&plan.hostname) {
+    let mut mdns = match mdns::advertise(&plan.hostname) {
         Ok(m) => Some(m),
         Err(e) => {
             fail(
@@ -227,6 +238,7 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
     }
 
     let mut since_tick = Duration::ZERO;
+    let mut hostname = plan.hostname;
     let ejected = loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
             break true;
@@ -234,6 +246,50 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         if crate::errors::session_has_errors() {
             break false;
         }
+
+        if let Some(next) = take_pending() {
+            let Some(join) = next.join else {
+                log::warn!("net: a pending plan has no SSID; ignoring it");
+                continue;
+            };
+
+            if next.hostname != hostname {
+                drop(mdns.take());
+                hostname = next.hostname;
+            }
+
+            if radio.rejoin(&hostname, &join).is_err() {
+                break false;
+            }
+
+            if mdns.is_none() {
+                mdns = match mdns::advertise(&hostname) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        fail(
+                            crate::status::ErrorLabel::NoMdns,
+                            &[
+                                "this station will not appear in a discovery browse",
+                                &format!("{e}"),
+                                "the Wii keeps recording replays to the card",
+                            ],
+                        );
+                        break false;
+                    }
+                };
+            }
+
+            check::set(check::Identity {
+                station: next.station,
+                station_name: next.station_name.clone(),
+                ssid: Some(join.ssid),
+            });
+            crate::status::set_name(&next.station_name);
+            since_tick = Duration::ZERO;
+            log::info!("net: re-applied config -- http://{hostname}.local/");
+            continue;
+        }
+
         std::thread::sleep(RED_POLL);
 
         since_tick += RED_POLL;

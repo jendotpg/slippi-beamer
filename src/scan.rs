@@ -48,6 +48,19 @@ pub fn replay_cap() -> u32 {
     REPLAY_CAP.load(Ordering::Relaxed)
 }
 
+pub fn set_replay_cap(cap: u32) {
+    if REPLAY_CAP.swap(cap, Ordering::Relaxed) == cap {
+        return;
+    }
+    refresh();
+}
+
+pub fn set_keep(keep: usize) {
+    if let Some(set) = lock(&SET).as_mut() {
+        set.set_cap(keep);
+    }
+}
+
 static FAST: Mutex<Option<report::Fast>> = Mutex::new(None);
 static SET: Mutex<Option<PublishedSet>> = Mutex::new(None);
 
