@@ -52,6 +52,8 @@ static atomic_uint s_dirty;
 static atomic_uint s_high_water;
 static atomic_uint s_stalls;
 static atomic_int s_policy = BEAMER_WBC_WRITEBACK;
+static atomic_uint s_read_wait_us;
+static atomic_uint s_read_wait_max_us;
 
 static SemaphoreHandle_t s_work; // wakes flush
 static SemaphoreHandle_t s_room; // wakes "out of sloots" writer
@@ -362,10 +364,19 @@ esp_err_t beamer_wbc_read(uint32_t lba, void *buf, size_t count)
         }
         xSemaphoreGive(s_meta_lock);
 
+        const int64_t t0 = esp_timer_get_time();
         if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(5000)) != pdTRUE)
         {
             return ESP_ERR_TIMEOUT;
         }
+        const uint32_t waited = (uint32_t)(esp_timer_get_time() - t0);
+        atomic_fetch_add(&s_read_wait_us, waited);
+        uint32_t seen = atomic_load(&s_read_wait_max_us);
+        while (waited > seen &&
+               !atomic_compare_exchange_weak(&s_read_wait_max_us, &seen, waited))
+        {
+        }
+
         const esp_err_t err =
             sdmmc_read_sectors(s_card, dst + i * WBC_SECTOR_SZ, lba + i, run);
         xSemaphoreGive(s_lock);
@@ -452,4 +463,20 @@ uint32_t beamer_wbc_high_water(void)
 uint32_t beamer_wbc_stalls(void)
 {
     return atomic_load(&s_stalls);
+}
+
+uint32_t beamer_wbc_read_wait_us(void)
+{
+    return atomic_load(&s_read_wait_us);
+}
+
+uint32_t beamer_wbc_read_wait_max_us(void)
+{
+    return atomic_load(&s_read_wait_max_us);
+}
+
+void beamer_wbc_read_wait_reset(void)
+{
+    atomic_store(&s_read_wait_us, 0);
+    atomic_store(&s_read_wait_max_us, 0);
 }

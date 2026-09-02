@@ -91,13 +91,15 @@ Everything a station will tell you, and the one destructive thing it will do for
 | `GET`  | `/SLIPPI/<file>` | The replay itself.                                                                       |
 | `POST` | `/reset-beamer`  | Wipes the replay drive. Requires`X-Beamer-Confirm: reset`.                               |
 
+Setting `DEBUG` can sometimes add endpoints under `/debug/` - they're for me! If you want to read the code and use them تَفَضَّلِي, but don't rely on them keeping the same shape or even existing on a new release.
+
 ### Discovery
 
 Every station advertises `_beamer._tcp` on port 80 over mDNS, and the instance name is its hostname — so a station shows up as `beamer-stream-station-2` once `STATION-NAME` is set, and as `beamer-<uuid>` before that.
 
 ### `GET /status`
 
-Everything here is cached by the scan tick so this `GET` has minimal cost.`POST` the same URL to rescan on demand. `ssh` is always `false` on esp32; it is in the contract because a Pi genuinely can offer it. `game` is `null` until this station has watched a game start. `live` says whether the last replay is still being written, and `ports` carries the character, costume colour and nametag of each occupied port during the last recorded game. `replay_count` and `replay_cap` are meant to be read together: `replay_count / replay_cap` is how full the drive is, and `replay_count == replay_cap` means counting stopped there. `secs_since_port_change` and `secs_since_character_change` give estimates for how long the set has been running: "how long have players been on these ports" and "how long have players been on these characters" (note that they're only updated when a game starts, so if players plug into the same ports you need to look at character change - but if one of the players is a known counterpicker you should look at ports! if new players plug into the same ports and play the same characters youre screwed.) `health` is `"ok"`, `"starting"`, `"warn"` or `"error"`. `"starting"` means the network has not finished coming up yet. `"warn"` means the `warnings` array is non-empty: the station is still theoretically recording, still serving and still safe to unplug, but something about it is off (usually the replay count is approaching cap or the Wii is failing to mount the Beamer).
+Everything here is cached by the scan tick so this `GET` has minimal cost.`POST` the same URL to rescan on demand. `ssh` is always `false` on esp32; it is in the contract because a Pi genuinely can offer it. `game` is `null` until this station has watched a game start. `live` says whether the last replay is still being written, and `ports` carries the character, costume colour and nametag of each occupied port during the last recorded game. `replay_count` and `replay_cap` are meant to be read together: `replay_count / replay_cap` is how full the drive is, and `replay_count == replay_cap` means counting stopped there. `secs_since_port_change` and `secs_since_character_change` give estimates for how long the set has been running: "how long have players been on these ports" and "how long have players been on these characters" (note that they're only updated when a game starts, so if players plug into the same ports you need to look at character change - but if one of the players is a known counterpicker you should look at ports! if new players plug into the same ports and play the same characters youre screwed.) `rssi`, `phy_mode` and `channel` are the station's own view of its radio, refreshed every ten seconds rather than per request, and `null` until the network is up. `health` is `"ok"`, `"starting"`, `"warn"` or `"error"`. `"starting"` means the network has not finished coming up yet. `"warn"` means the `warnings` array is non-empty: the station is still theoretically recording, still serving and still safe to unplug, but something about it is off (usually the replay count is approaching cap or the Wii is failing to mount the Beamer).
 
 ```json
 {
@@ -107,6 +109,9 @@ Everything here is cached by the scan tick so this `GET` has minimal cost.`POST`
   "station_id": "3f2a...",
   "station_name": "stream station 2",
   "ssid": "nycmelee",
+  "rssi": -58,
+  "phy_mode": "HT20",
+  "channel": 6,
   "replay_count": 47,
   "replay_cap": 512,
   "ssh": false,

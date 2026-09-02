@@ -173,6 +173,7 @@ impl Radio {
         let connected = self.wifi.is_connected().unwrap_or(false);
         let up = self.wifi.is_up().unwrap_or(false);
         if connected && up {
+            sample_link();
             if let Some(ip) = current_ip(&self.wifi) {
                 status::set_net(Net::Up(ip));
             }
@@ -210,6 +211,62 @@ fn current_ip(wifi: &BlockingWifi<EspWifi<'static>>) -> Option<Ipv4Addr> {
     } else {
         Some(ip)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Link {
+    pub rssi: i32,
+    pub phy: &'static str,
+    pub channel: u8,
+}
+
+static LINK: std::sync::Mutex<Option<Link>> = std::sync::Mutex::new(None);
+
+pub fn link() -> Option<Link> {
+    *LINK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn phy_name(mode: esp_idf_svc::sys::wifi_phy_mode_t) -> &'static str {
+    use esp_idf_svc::sys::*;
+    #[allow(non_upper_case_globals)]
+    match mode {
+        wifi_phy_mode_t_WIFI_PHY_MODE_LR => "LR",
+        wifi_phy_mode_t_WIFI_PHY_MODE_11B => "11B",
+        wifi_phy_mode_t_WIFI_PHY_MODE_11G => "11G",
+        wifi_phy_mode_t_WIFI_PHY_MODE_11A => "11A",
+        wifi_phy_mode_t_WIFI_PHY_MODE_HT20 => "HT20",
+        wifi_phy_mode_t_WIFI_PHY_MODE_HT40 => "HT40",
+        wifi_phy_mode_t_WIFI_PHY_MODE_HE20 => "HE20",
+        wifi_phy_mode_t_WIFI_PHY_MODE_VHT20 => "VHT20",
+        _ => "unknown",
+    }
+}
+
+fn sample_link() {
+    use esp_idf_svc::sys::*;
+
+    let mut rssi: core::ffi::c_int = 0;
+    let rssi = if unsafe { esp_wifi_sta_get_rssi(&mut rssi) } == ESP_OK {
+        rssi
+    } else {
+        return;
+    };
+
+    let mut mode: wifi_phy_mode_t = 0;
+    let phy = if unsafe { esp_wifi_sta_get_negotiated_phymode(&mut mode) } == ESP_OK {
+        phy_name(mode)
+    } else {
+        "unknown"
+    };
+
+    let mut ap = wifi_ap_record_t::default();
+    let channel = if unsafe { esp_wifi_sta_get_ap_info(&mut ap) } == ESP_OK {
+        ap.primary
+    } else {
+        0
+    };
+
+    *LINK.lock().unwrap_or_else(|e| e.into_inner()) = Some(Link { rssi, phy, channel });
 }
 
 fn associated_ssid() -> Option<String> {

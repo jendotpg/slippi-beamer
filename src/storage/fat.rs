@@ -141,11 +141,25 @@ pub struct ReadWindow {
     guard: MutexGuard<'static, ()>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OpenTiming {
+    pub lock_us: u32,
+    pub mount_us: u32,
+}
+
 impl ReadWindow {
-    pub fn open(sd: &SdCard) -> Result<ReadWindow, EspError> {
+    pub fn open_measured(sd: &SdCard) -> Result<(ReadWindow, OpenTiming), EspError> {
         let _ = sd;
+        let t0 = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
         let guard = RO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        ReadWindow::mount_locked(guard)
+        let t1 = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
+        let window = ReadWindow::mount_locked(guard)?;
+        let t2 = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
+        let timing = OpenTiming {
+            lock_us: (t1 - t0) as u32,
+            mount_us: (t2 - t1) as u32,
+        };
+        Ok((window, timing))
     }
 
     pub fn try_open(sd: &SdCard) -> Result<Option<ReadWindow>, EspError> {

@@ -118,6 +118,9 @@ extern "C"
     uint32_t beamer_wbc_high_water(void);
     uint32_t beamer_wbc_capacity(void);
     uint32_t beamer_wbc_stalls(void);
+    uint32_t beamer_wbc_read_wait_us(void);
+    uint32_t beamer_wbc_read_wait_max_us(void);
+    void beamer_wbc_read_wait_reset(void);
 
     esp_err_t beamer_sd_init(sdmmc_card_t **out_card, SemaphoreHandle_t *out_lock);
     uint64_t beamer_sd_bytes(const sdmmc_card_t *card);

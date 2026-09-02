@@ -33,11 +33,19 @@ pub struct Fast {
     pub character_change_at: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct LinkInfo {
+    pub rssi: i32,
+    pub phy: &'static str,
+    pub channel: u8,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn status_json(
     station_id: &str,
     station_name: &str,
     ssid: Option<&str>,
+    link: Option<LinkInfo>,
     fast: &Fast,
     replay_cap: u32,
     now_s: u64,
@@ -61,6 +69,19 @@ pub fn status_json(
     line_str(&mut s, "station_id", Some(station_id));
     line_str(&mut s, "station_name", Some(station_name));
     line_str(&mut s, "ssid", ssid);
+
+    match link {
+        Some(l) => {
+            let _ = writeln!(s, "  \"rssi\": {},", l.rssi);
+            line_str(&mut s, "phy_mode", Some(l.phy));
+            let _ = writeln!(s, "  \"channel\": {},", l.channel);
+        }
+        None => {
+            s.push_str("  \"rssi\": null,\n");
+            s.push_str("  \"phy_mode\": null,\n");
+            s.push_str("  \"channel\": null,\n");
+        }
+    }
 
     let _ = writeln!(s, "  \"replay_count\": {},", fast.replay_count);
     let _ = writeln!(s, "  \"replay_cap\": {replay_cap},");
