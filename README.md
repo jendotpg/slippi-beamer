@@ -270,7 +270,7 @@ The main memory constraint is the largest free block, not the number of free byt
 | WiFi RX management buffers, 5 × ~500                                                                                                                                                |  ~2,500 |
 | mDNS steady state                                                                                                                                                                   |  ~7,000 |
 | NVS page cache                                                                                                                                                                      |  ~3,000 |
-| The read window's FatFs registration                                                                                                                                                |   2,220 |
+| The read window's FatFs registration — one `FATFS` plus `MAX_FILES` file buffers, all sized by the 4,096 B sector setting                                                           | ~12,000 |
 | The rendered reset census, two short lines held for the boot                                                                                                                        |    ~250 |
 
 #### Dynamically allocated
@@ -289,19 +289,19 @@ The main memory constraint is the largest free block, not the number of free byt
 
 ##### Hard limits
 
-|                         | Limit                                    | Set by                                                                                                                                              |
-| ----------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FatFs volumes           | 2                                        | `CONFIG_FATFS_VOLUME_COUNT` — one is held for the boot by the read window                                                                           |
-| FatFs sector size       | 512 B                                    | `CONFIG_WL_SECTOR_SIZE_512`; it sizes `FATFS.win[]` and every `FIL.buf[]`, and at 4096 the mount context is 21 KB instead of 2.2 KB                 |
-| Open files per mount    | 2                                        | `MAX_FILES` in `storage/fat.rs`                                                                                                                     |
-| Concurrent HTTP sockets | 4                                        | `esp_http_server`, 192 B of state each. It is one task, so handlers run one at a time and only one send queue is ever full                          |
-| TCP send window         | 23,040 B                                 | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT`; window/RTT is the download ceiling, so this is what sets it. `CONFIG_LWIP_TCP_WND_DEFAULT` stays at 5,760        |
-| Write-back cache        | 64 sectors                               | `WBC_SECTORS`; `high water` and `stalls` in `LOGS/debug_N.txt` say whether it is enough                                                             |
-| Replays served          | 16                                       | `NUM-REPLAYS-SERVED` ceiling                                                                                                                        |
-| Replays counted         | `REPLAY-CAP`, default 512, ceiling 2,048 | `replay_count` saturates at `replay_cap`, both reported in `GET /status`                                                                            |
-| Error text kept         | 2,048 B per store                        | then truncated                                                                                                                                      |
-| Captured log kept       | 4,096 B                                  | oldest lines dropped                                                                                                                                |
-| Journal partition       | 64 KB                                    | `jrnl`, separate from `nvs` so diagnostics cannot exhaust a station's durable state; the reset census adds one 37-byte key, rewritten once per boot |
+|                         | Limit                                    | Set by                                                                                                                                                |
+| ----------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FatFs volumes           | 2                                        | `CONFIG_FATFS_VOLUME_COUNT` — one is held for the boot by the read window                                                                             |
+| FatFs sector size       | 4,096 B                                  | `CONFIG_FATFS_SECTOR_4096`. It sizes `FATFS.win[]` and, with `CONFIG_FATFS_PER_FILE_CACHE`, every `FIL.buf[]` — so one volume registration is ~12 KB. |
+| Open files per mount    | 2                                        | `MAX_FILES` in `storage/fat.rs`                                                                                                                       |
+| Concurrent HTTP sockets | 4                                        | `esp_http_server`, 192 B of state each. It is one task, so handlers run one at a time and only one send queue is ever full                            |
+| TCP send window         | 23,040 B                                 | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT`; window/RTT is the download ceiling, so this is what sets it. `CONFIG_LWIP_TCP_WND_DEFAULT` stays at 5,760          |
+| Write-back cache        | 64 sectors                               | `WBC_SECTORS`; `high water` and `stalls` in `LOGS/debug_N.txt` say whether it is enough                                                               |
+| Replays served          | 16                                       | `NUM-REPLAYS-SERVED` ceiling                                                                                                                          |
+| Replays counted         | `REPLAY-CAP`, default 512, ceiling 2,048 | `replay_count` saturates at `replay_cap`, both reported in `GET /status`                                                                              |
+| Error text kept         | 2,048 B per store                        | then truncated                                                                                                                                        |
+| Captured log kept       | 4,096 B                                  | oldest lines dropped                                                                                                                                  |
+| Journal partition       | 64 KB                                    | `jrnl`, separate from `nvs` so diagnostics cannot exhaust a station's durable state; the reset census adds one 37-byte key, rewritten once per boot   |
 
 ### Releasing
 
