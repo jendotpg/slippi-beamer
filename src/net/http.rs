@@ -104,10 +104,17 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
             respond_json(req, 200, last_transfer_json().as_bytes())
         })?;
 
+        #[allow(clippy::redundant_closure)]
         server
             .fn_handler::<anyhow::Error, _>("/debug/zeros", Method::Get, |req| send_zeros(req))?;
 
-        log::info!("debug endpoints on: /debug/transfer /debug/zeros");
+        server.fn_handler::<anyhow::Error, _>("/debug/heap", Method::Get, |req| {
+            let (free, largest) = crate::journal::heap_now();
+            let body = format!(r#"{{"free": {free}, "largest_block": {largest}}}"#);
+            respond_json(req, 200, body.as_bytes())
+        })?;
+
+        log::info!("debug endpoints on: /debug/transfer /debug/zeros /debug/heap");
     }
 
     let card = sd;

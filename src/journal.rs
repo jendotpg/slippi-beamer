@@ -692,7 +692,7 @@ pub fn heap_note() -> String {
     format!("heap: {free} B free, largest block {largest} B")
 }
 
-fn heap_now() -> (u32, u32) {
+pub fn heap_now() -> (u32, u32) {
     use esp_idf_svc::sys::{
         heap_caps_get_largest_free_block, MALLOC_CAP_8BIT, MALLOC_CAP_INTERNAL,
     };
