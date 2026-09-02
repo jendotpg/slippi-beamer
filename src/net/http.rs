@@ -84,7 +84,7 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
     })?;
 
     server.fn_handler::<anyhow::Error, _>("/status", Method::Get, |req| {
-        respond_json(req, 200, status_body().as_bytes())
+        with_status_body(|b| respond_json(req, 200, b.as_bytes()))
     })?;
 
     server.fn_handler::<anyhow::Error, _>("/status", Method::Post, |req| {
@@ -92,11 +92,11 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
             return respond_json(req, 409, ERR_BUSY);
         };
         scan::refresh();
-        respond_json(req, 200, status_body().as_bytes())
+        with_status_body(|b| respond_json(req, 200, b.as_bytes()))
     })?;
 
     server.fn_handler::<anyhow::Error, _>(SLIPPI_PREFIX, Method::Get, |req| {
-        respond_json(req, 200, &scan::index_json())
+        with_index_body(|b| respond_json(req, 200, b.as_bytes()))
     })?;
 
     if debug_enabled() {
@@ -110,7 +110,9 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
 
         server.fn_handler::<anyhow::Error, _>("/debug/heap", Method::Get, |req| {
             let (free, largest) = crate::journal::heap_now();
-            let body = format!(r#"{{"free": {free}, "largest_block": {largest}}}"#);
+            let low = crate::journal::heap_low();
+            let body =
+                format!(r#"{{"free": {free}, "largest_block": {largest}, "low_water": {low}}}"#);
             respond_json(req, 200, body.as_bytes())
         })?;
 
@@ -322,6 +324,7 @@ where
     (stats.sd_wait_us, stats.sd_wait_max_us) = crate::storage::msc::read_wait();
     stats.total_us = (now_us() - t_start) as u32;
     publish_stats(stats);
+    crate::journal::heap_checkin();
     Ok(())
 }
 
@@ -446,30 +449,43 @@ fn error_body(msg: &str) -> String {
     s
 }
 
-fn status_body() -> String {
+static BODY_BUF: Mutex<report::Buf<{ report::STATUS_CAP }>> = Mutex::new(report::Buf::new());
+
+fn with_index_body<R>(f: impl FnOnce(&report::Buf<{ report::STATUS_CAP }>) -> R) -> R {
+    let mut buf = BODY_BUF.lock().unwrap_or_else(|e| e.into_inner());
+    scan::copy_index_into(&mut buf);
+    f(&buf)
+}
+
+fn with_status_body<R>(f: impl FnOnce(&report::Buf<{ report::STATUS_CAP }>) -> R) -> R {
     let id = super::check::identity();
     let link = super::wifi::link().map(|l| report::LinkInfo {
         rssi: l.rssi,
         phy: l.phy,
         channel: l.channel,
     });
-    report::status_json(
-        &id.station,
-        &id.station_name,
-        id.ssid.as_deref(),
-        link,
-        &scan::fast(),
-        scan::replay_cap(),
-        scan::uptime_s(),
-        errors::session_has_errors(),
-        &crate::warnings::labels(),
-        match super::result() {
-            super::NetResult::Ok => report::Health::Ok,
-            super::NetResult::Pending => report::Health::Starting,
-            super::NetResult::Offline => report::Health::Ok, // this means no ssid was set in config!
-            super::NetResult::Fail => report::Health::Error,
-        },
-    )
+    let mut buf = BODY_BUF.lock().unwrap_or_else(|e| e.into_inner());
+    scan::with_fast(|fast| {
+        report::status_json(
+            &id.station,
+            &id.station_name,
+            id.ssid.as_deref(),
+            link,
+            fast,
+            scan::replay_cap(),
+            scan::uptime_s(),
+            errors::session_has_errors(),
+            &crate::warnings::labels(),
+            match super::result() {
+                super::NetResult::Ok => report::Health::Ok,
+                super::NetResult::Pending => report::Health::Starting,
+                super::NetResult::Offline => report::Health::Ok,
+                super::NetResult::Fail => report::Health::Error,
+            },
+            &mut buf,
+        );
+    });
+    f(&buf)
 }
 
 fn respond_json<C>(

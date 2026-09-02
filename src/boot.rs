@@ -99,7 +99,7 @@ pub fn run() -> anyhow::Result<()> {
 
     // --- PrepareForBind --------------------------------------------------
     journal::mark(Phase::PrepareForBind);
-    let (outcome, raw_config) = write_window(&sd, &id);
+    let outcome = write_window(&sd, &id);
 
     let settings = Settings::from(&outcome);
     status::set_brightness(settings.led_global);
@@ -149,7 +149,7 @@ pub fn run() -> anyhow::Result<()> {
 
     let station_id = id.to_string();
     let plan = net::Plan::from(&outcome, &station_id);
-    let mut reloader = reload::Watcher::new(raw_config, settings, plan.clone());
+    let mut reloader = reload::Watcher::new(settings, plan.clone());
     if let Err(e) = net::spawn(p.modem, nvs, sd.clone(), plan) {
         errors::error(
             Target::Late,
@@ -627,7 +627,7 @@ fn check_partition(sd: &SdCard) {
     }
 }
 
-fn write_window(sd: &SdCard, id: &StationId) -> (Outcome, Vec<u8>) {
+fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
     let window = match WriteWindow::open(sd) {
         Ok(w) => w,
         Err(e) => {
@@ -641,7 +641,7 @@ fn write_window(sd: &SdCard, id: &StationId) -> (Outcome, Vec<u8>) {
                     &detail,
                 ],
             );
-            return (Outcome::unreadable(detail), Vec::new());
+            return Outcome::unreadable(detail);
         }
     };
 
@@ -651,10 +651,7 @@ fn write_window(sd: &SdCard, id: &StationId) -> (Outcome, Vec<u8>) {
     log::info!("volume seeded");
 
     let path = format!("{BASE_PATH}/CONFIG/config.txt");
-    let (outcome, raw) = match std::fs::read(&path) {
-        Ok(bytes) => (Outcome::parse_bytes(&bytes), bytes),
-        Err(e) => (Outcome::unreadable(format!("{e}")), Vec::new()),
-    };
+    let outcome = reload::load_initial(&path);
 
     let station_id = id.to_string();
 
@@ -713,7 +710,7 @@ fn write_window(sd: &SdCard, id: &StationId) -> (Outcome, Vec<u8>) {
     drop(window);
     log::info!("write window closed");
 
-    (outcome, raw)
+    outcome
 }
 
 fn seed_volume() {

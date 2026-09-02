@@ -332,65 +332,80 @@ impl Game {
         sig
     }
 
-    pub fn to_json(&self) -> String {
-        let mut s = String::with_capacity(256);
+    pub fn to_json_into(&self, s: &mut crate::report::GameJson) {
+        s.clear();
         let _ = write!(s, "{{\"live\":{},\"ports\":[", self.live);
         for (i, p) in self.ports.iter().enumerate() {
             if i > 0 {
-                s.push(',');
+                let _ = s.push(',');
             }
             let _ = write!(s, "{{\"port\":{},\"char\":", p.port);
             match p.char_name {
                 Some(name) => {
                     let _ = write!(s, "\"{name}\"");
                 }
-                None => s.push_str("null"),
+                None => {
+                    let _ = s.push_str("null");
+                }
             }
-            s.push_str(",\"char_id\":");
+            let _ = s.push_str(",\"char_id\":");
             match p.char_id {
                 Some(id) => {
                     let _ = write!(s, "{id}");
                 }
-                None => s.push_str("null"),
+                None => {
+                    let _ = s.push_str("null");
+                }
             }
-            s.push_str(",\"color\":");
+            let _ = s.push_str(",\"color\":");
             match p.color {
                 Some(c) => {
                     let _ = write!(s, "\"{c}\"");
                 }
-                None => s.push_str("null"),
+                None => {
+                    let _ = s.push_str("null");
+                }
             }
             let _ = write!(s, ",\"costume\":{}", p.costume);
-            s.push_str(",\"nametag\":");
+            let _ = s.push_str(",\"nametag\":");
             match &p.nametag {
                 Some(tag) => {
-                    s.push('"');
-                    escape_json_into(tag, &mut s);
-                    s.push('"');
+                    let _ = s.push('"');
+                    escape_json_into(tag, s);
+                    let _ = s.push('"');
                 }
-                None => s.push_str("null"),
+                None => {
+                    let _ = s.push_str("null");
+                }
             }
-            s.push('}');
+            let _ = s.push('}');
         }
-        s.push_str("]}");
-        s
+        let _ = s.push_str("]}");
     }
 }
 
-pub fn escape_json_into(s: &str, out: &mut String) {
+pub fn escape_json_into<W: core::fmt::Write>(s: &str, out: &mut W) {
     for c in s.chars() {
         match c {
             '"' | '\\' => {
-                out.push('\\');
-                out.push(c);
+                let _ = out.write_char('\\');
+                let _ = out.write_char(c);
             }
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
+            '\n' => {
+                let _ = out.write_str("\\n");
+            }
+            '\r' => {
+                let _ = out.write_str("\\r");
+            }
+            '\t' => {
+                let _ = out.write_str("\\t");
+            }
             c if (c as u32) < 0x20 => {
                 let _ = write!(out, "\\u{:04x}", c as u32);
             }
-            c => out.push(c),
+            c => {
+                let _ = out.write_char(c);
+            }
         }
     }
 }

@@ -4,6 +4,7 @@
 //!
 //! During the boot process, init() below rotates the previous sessions Late
 //! errors off of NVS and onto the disk at LOGS/error.txt.
+use core::fmt::Write as _;
 use std::sync::{Mutex, MutexGuard};
 
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
@@ -23,18 +24,26 @@ pub enum Target {
     Late,
 }
 
+const BLOB_CAP: usize = CAP + TRUNCATED.len();
+type Blob = heapless::String<BLOB_CAP>;
+
+const ENTRY_CAP: usize = 1024;
+type Entry = heapless::String<ENTRY_CAP>;
+
 struct Store {
-    session: String,
-    late: String,
-    prev: String,
+    session: Blob,
+    late: Blob,
+    prev: Blob,
+    entry: Entry,
     distinct: u32,
     nvs: Option<EspNvs<NvsDefault>>,
 }
 
 static STORE: Mutex<Store> = Mutex::new(Store {
-    session: String::new(),
-    late: String::new(),
-    prev: String::new(),
+    session: Blob::new(),
+    late: Blob::new(),
+    prev: Blob::new(),
+    entry: Entry::new(),
     distinct: 0,
     nvs: None,
 });
@@ -54,7 +63,8 @@ pub fn init(part: EspDefaultNvsPartition) {
         }
     };
 
-    let late = read(&nvs, KEY_LATE);
+    let mut late = Blob::new();
+    read(&nvs, KEY_LATE, &mut late);
     if late.is_empty() {
         let _ = nvs.remove(KEY_PREV);
     } else if let Err(e) = nvs.set_blob(KEY_PREV, late.as_bytes()) {
@@ -63,7 +73,7 @@ pub fn init(part: EspDefaultNvsPartition) {
         let _ = nvs.remove(KEY_LATE);
     }
 
-    s.prev = read(&nvs, KEY_PREV);
+    read(&nvs, KEY_PREV, &mut s.prev);
     s.nvs = Some(nvs);
 
     if !s.prev.is_empty() {
@@ -90,16 +100,29 @@ pub fn error(target: Target, label: ErrorLabel, component: &str, lines: &[&str])
         return;
     }
 
-    let indent = " ".repeat(component.len() + 3);
-    let mut entry = head_line.clone();
-    entry.push('\n');
-    for line in rest {
-        entry.push_str(&indent);
-        entry.push_str(line);
-        entry.push('\n');
+    {
+        let Store {
+            entry,
+            session,
+            late,
+            ..
+        } = &mut *s;
+        entry.clear();
+        let _ = entry.push_str(&head_line);
+        let _ = entry.push('\n');
+        for line in rest {
+            for _ in 0..component.len() + 3 {
+                let _ = entry.push(' ');
+            }
+            let _ = entry.push_str(line);
+            let _ = entry.push('\n');
+        }
+        let blob = match target {
+            Target::Session => session,
+            Target::Late => late,
+        };
+        append(blob, entry);
     }
-
-    append(s.blob_mut(target), &entry);
     s.distinct += 1;
     let more = s.distinct - 1;
     if target == Target::Late {
@@ -133,12 +156,16 @@ pub fn record_previous(component: &str, lines: &[&str]) {
         return;
     };
 
-    let indent = " ".repeat(component.len() + 3);
-    let mut entry = format!("[{component}] {head}\n");
+    let mut s = store();
+    let Store { entry, prev, .. } = &mut *s;
+    entry.clear();
+    let _ = writeln!(entry, "[{component}] {head}");
     for line in rest {
-        entry.push_str(&indent);
-        entry.push_str(line);
-        entry.push('\n');
+        for _ in 0..component.len() + 3 {
+            let _ = entry.push(' ');
+        }
+        let _ = entry.push_str(line);
+        let _ = entry.push('\n');
     }
 
     log::error!("[{component}] {head}");
@@ -146,7 +173,7 @@ pub fn record_previous(component: &str, lines: &[&str]) {
         log::error!("  {line}");
     }
 
-    append(&mut store().prev, &entry);
+    append(prev, entry);
 }
 
 pub fn halt(label: ErrorLabel, component: &str, lines: &[&str]) -> ! {
@@ -208,17 +235,10 @@ right now!
 ";
 
 impl Store {
-    fn blob(&self, target: Target) -> &String {
+    fn blob(&self, target: Target) -> &Blob {
         match target {
             Target::Session => &self.session,
             Target::Late => &self.late,
-        }
-    }
-
-    fn blob_mut(&mut self, target: Target) -> &mut String {
-        match target {
-            Target::Session => &mut self.session,
-            Target::Late => &mut self.late,
         }
     }
 
@@ -230,25 +250,25 @@ impl Store {
     }
 }
 
-fn append(blob: &mut String, entry: &str) {
+fn append(blob: &mut Blob, entry: &str) {
     if blob.ends_with(TRUNCATED) {
         return;
     }
     if blob.len() + entry.len() > CAP {
-        blob.push_str(TRUNCATED);
+        let _ = blob.push_str(TRUNCATED); // fits: BLOB_CAP is CAP plus this marker
         return;
     }
-    blob.push_str(entry);
+    let _ = blob.push_str(entry);
 }
 
-fn read(nvs: &EspNvs<NvsDefault>, key: &str) -> String {
-    let mut buf = vec![0u8; CAP + TRUNCATED.len()];
+fn read(nvs: &EspNvs<NvsDefault>, key: &str, out: &mut Blob) {
+    out.clear();
+    let mut buf = vec![0u8; BLOB_CAP];
     match nvs.get_blob(key, &mut buf) {
-        Ok(Some(bytes)) => String::from_utf8_lossy(bytes).into_owned(),
-        Ok(None) => String::new(),
-        Err(e) => {
-            log::warn!("could not read {key}: {e}");
-            String::new()
+        Ok(Some(bytes)) => {
+            let _ = out.push_str(&String::from_utf8_lossy(bytes));
         }
+        Ok(None) => {}
+        Err(e) => log::warn!("could not read {key}: {e}"),
     }
 }

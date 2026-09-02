@@ -7,8 +7,27 @@ pub const SSID_MAX_BYTES: usize = 32;
 pub const PSK_MIN: usize = 8;
 pub const PSK_MAX: usize = 63;
 pub const HOSTNAME_SLUG_MAX: usize = 56;
+pub const CONFIG_MAX: usize = 4096;
+
+pub type ConfigBytes = heapless::Vec<u8, CONFIG_MAX>;
+
+pub fn read_file(path: &str, out: &mut ConfigBytes) -> std::io::Result<()> {
+    use std::io::Read as _;
+
+    let len = std::fs::metadata(path)?.len() as usize;
+    if len > CONFIG_MAX {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("config.txt is {len} bytes; the maximum is {CONFIG_MAX}"),
+        ));
+    }
+    out.clear();
+    let _ = out.resize(len, 0);
+    std::fs::File::open(path)?.read_exact(out)
+}
+
 pub const REPLAY_CAP_DEFAULT: u32 = 512;
-pub const REPLAY_CAP_MAX: u32 = 2048;
+pub const REPLAY_CAP_MAX: u32 = 512;
 pub const LED_PCT_DEFAULT: u8 = 20;
 pub const LED_PCT_MAX: u8 = 100;
 pub const DEBUG_DEFAULT: bool = false;

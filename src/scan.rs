@@ -28,6 +28,8 @@ use crate::warnings::{self, WarningLabel};
 const TICK: Duration = Duration::from_secs(1);
 static REPLAY_CAP: AtomicU32 = AtomicU32::new(crate::config::REPLAY_CAP_DEFAULT);
 const MAX_NEW: usize = 8;
+const CAP_MAX: usize = crate::config::REPLAY_CAP_MAX as usize;
+const PRESENT_BYTES: usize = CAP_MAX.div_ceil(8);
 static GAME_LIVE: AtomicBool = AtomicBool::new(false);
 static PARKED: AtomicBool = AtomicBool::new(false);
 
@@ -62,32 +64,37 @@ pub fn set_keep(keep: usize) {
 }
 
 static FAST: Mutex<Option<report::Fast>> = Mutex::new(None);
-static SET: Mutex<Option<PublishedSet>> = Mutex::new(None);
+static SET: Mutex<Option<PublishedSet>> = Mutex::new(Some(PublishedSet::empty()));
 
 fn lock<T>(m: &'static Mutex<T>) -> MutexGuard<'static, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-pub fn fast() -> report::Fast {
-    lock(&FAST).clone().unwrap_or_default()
+pub fn with_fast<R>(f: impl FnOnce(&report::Fast) -> R) -> R {
+    static EMPTY: report::Fast = report::Fast::new();
+    match lock(&FAST).as_ref() {
+        Some(v) => f(v),
+        None => f(&EMPTY),
+    }
 }
 
 pub fn is_published(name: &str) -> bool {
     lock(&SET).as_ref().is_some_and(|s| s.contains(name))
 }
 
-pub fn index_json() -> Vec<u8> {
-    lock(&SET)
-        .as_ref()
-        .map(|s| s.index_json().to_vec())
-        .unwrap_or_else(|| report::index_json("", &[]))
+pub fn copy_index_into<const N: usize>(out: &mut report::Buf<N>) {
+    let set = lock(&SET);
+    match set.as_ref() {
+        Some(s) => out.set_str(s.index_str()),
+        None => out.set_str(report::EMPTY_INDEX),
+    }
 }
 
 pub fn forget_all() {
     {
         let mut tracker = lock(&TRACKER);
         if let Some(t) = tracker.as_mut() {
-            t.seen = Vec::new();
+            t.seen.clear();
             t.has_baseline = true;
             t.pending_list = true;
             t.ticks_since_list = 0;
@@ -106,15 +113,21 @@ pub fn forget_all() {
 }
 
 pub fn refresh() {
-    lock(&TRACKER).get_or_insert_with(Tracker::new).list();
+    if let Some(t) = lock(&TRACKER).as_mut() {
+        t.list();
+    }
 }
 
-static TRACKER: Mutex<Option<Tracker>> = Mutex::new(None);
+static TRACKER: Mutex<Option<Tracker>> = Mutex::new(Some(Tracker::new()));
 
 pub fn spawn(sd: Arc<SdCard>, station: String, cap: usize, replay_cap: u32) -> anyhow::Result<()> {
     REPLAY_CAP.store(replay_cap, Ordering::Relaxed);
-    *lock(&SET) = Some(PublishedSet::new(station, cap));
-    *lock(&TRACKER) = Some(Tracker::with_card(sd));
+    if let Some(s) = lock(&SET).as_mut() {
+        s.init(station, cap);
+    }
+    if let Some(t) = lock(&TRACKER).as_mut() {
+        t.sd = Some(sd);
+    }
 
     ThreadSpawnConfiguration {
         name: Some(c"scan"),
@@ -163,7 +176,8 @@ fn run() {
 
 struct Tracker {
     sd: Option<Arc<SdCard>>,
-    seen: Vec<u64>,
+    seen: heapless::Vec<u64, CAP_MAX>,
+    present: [u8; PRESENT_BYTES],
     has_baseline: bool,
     live: Option<String>,
     port_sig: Option<u8>,
@@ -180,10 +194,11 @@ const PEEK_BACKSTOP_TICKS: u32 = 10;
 const LIST_BACKSTOP_TICKS: u32 = 60;
 
 impl Tracker {
-    fn new() -> Tracker {
+    const fn new() -> Tracker {
         Tracker {
             sd: None,
-            seen: Vec::new(),
+            seen: heapless::Vec::new(),
+            present: [0; PRESENT_BYTES],
             has_baseline: false,
             live: None,
             port_sig: None,
@@ -193,13 +208,6 @@ impl Tracker {
             pending_list: true, // the baseline listing, on the first tick
             ticks_since_list: 0,
             mount_fails: 0,
-        }
-    }
-
-    fn with_card(sd: Arc<SdCard>) -> Tracker {
-        Tracker {
-            sd: Some(sd),
-            ..Tracker::new()
         }
     }
 
@@ -264,14 +272,24 @@ impl Tracker {
             }
         };
 
-        let mut hashes: Vec<u64> = Vec::with_capacity(self.seen.len());
-        let mut fresh: Vec<String> = Vec::new();
         let known = &self.seen;
-        let walk = window.for_each_replay(REPLAY_CAP.load(Ordering::Relaxed), |name| {
+        let present = &mut self.present;
+        present.fill(0);
+        let mut fresh: Vec<String> = Vec::new();
+        let mut added: heapless::Vec<u64, MAX_NEW> = heapless::Vec::new();
+        let mut misses = 0usize;
+        let cap = REPLAY_CAP.load(Ordering::Relaxed);
+        let walk = window.for_each_replay(cap, |name| {
             let h = hash(name);
-            hashes.push(h);
-            if known.binary_search(&h).is_err() && fresh.len() < MAX_NEW {
-                fresh.push(name.to_owned());
+            match known.binary_search(&h) {
+                Ok(i) => present[i / 8] |= 1 << (i % 8),
+                Err(_) => {
+                    misses += 1;
+                    if fresh.len() < MAX_NEW {
+                        fresh.push(name.to_owned());
+                        let _ = added.push(h);
+                    }
+                }
             }
         });
 
@@ -288,20 +306,48 @@ impl Tracker {
         self.pending_list = false;
         self.ticks_since_list = 0;
 
-        hashes.sort_unstable();
+        if misses > MAX_NEW {
+            self.seen.clear();
+            self.present.fill(0);
+            let rebuilt = window.for_each_replay(cap, |name| {
+                let _ = self.seen.push(hash(name));
+            });
+            if let Err(e) = rebuilt {
+                log::warn!("scan: could not re-list SLIPPI/: {e}");
+                warnings::set(WarningLabel::DriveFailing, true);
+                return;
+            }
+            self.seen.sort_unstable();
+        } else {
+            let mut kept = 0;
+            for i in 0..self.seen.len() {
+                if self.present[i / 8] & (1 << (i % 8)) != 0 {
+                    self.seen[kept] = self.seen[i];
+                    kept += 1;
+                }
+            }
+            self.seen.truncate(kept);
+            for h in added.iter().copied() {
+                if let Err(pos) = self.seen.binary_search(&h) {
+                    if self.seen.insert(pos, h).is_err() {
+                        log::warn!("scan: {CAP_MAX} hashes tracked -- a replay is not served");
+                        break;
+                    }
+                }
+            }
+        }
         let first = !self.has_baseline;
-        self.seen = hashes;
         self.has_baseline = true;
 
         {
             let mut f = lock(&FAST);
-            f.get_or_insert_with(report::Fast::default).replay_count = count;
+            f.get_or_insert_with(report::Fast::new).replay_count = count;
         }
 
-        let cap = replay_cap();
         warnings::set(WarningLabel::DriveFailing, false);
         warnings::set_fill(count, cap);
         status::set_files(count, cap);
+        crate::journal::heap_checkin(); // a walk overlapping a download is the tightest the heap gets
 
         if first {
             log::info!("scan: baseline -- {count} replay(s) on the card, none served");
@@ -335,11 +381,7 @@ impl Tracker {
                 finished.clear();
                 break;
             }
-            self.publish_game(&game); // if a game started and finished between ticks, publish it
-                                      // this is worth thinking further about - maybe dont? do
-                                      // we need 10 second games at all? on the other hand, maybe
-                                      // the tick can be bumped when facing performance issues, and
-                                      // sami singles fox dittos can actually be thta fast...
+            self.publish_game(&game);
             finished.push((name.clone(), size_of(&window, name)));
         }
 
@@ -391,8 +433,9 @@ impl Tracker {
         let (ports, chars) = (game.port_sig(), game.character_sig());
 
         let mut guard = lock(&FAST);
-        let f = guard.get_or_insert_with(report::Fast::default);
-        f.game = Some(game.to_json());
+        let f = guard.get_or_insert_with(report::Fast::new);
+        // rendered straight into the static, never through a stack copy
+        game.to_json_into(f.game.get_or_insert_with(report::GameJson::new));
         if self.port_sig != Some(ports) {
             self.port_sig = Some(ports);
             f.port_change_at = Some(now);

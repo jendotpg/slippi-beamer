@@ -4,11 +4,14 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. optimize download speeds :3
-2. support other boards with different pinouts? different build options, maybe?
+1. when losing wifi live, throw an error! it just silently stops working btu stays green :(
+2. read-ahead cache? this is probably the best way to get faster downloads...
+   1. idk if theres enough memory tbh....
+
+3. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-3. colorblind mode? blue instead of amber?
+4. colorblind mode? blue instead of amber?
 
 ## Configuring a station
 
@@ -242,66 +245,56 @@ Everything else — serving replays over HTTP, counting files, peeking at the ga
 
 ### Memory
 
-The main memory constraint is the largest free block, not the number of free bytes. Both numbers are logged, at boot, when the network comes up, in every periodic journal summary, and beside any mount failure. They arrive as `heap: N B free, largest block M B` in `LOGS/debug_N.txt`, when `DEBUG` is set. A healthy station settles around 60 KB free, and the gap between the two figures is the fragmentation. The journal summary also carries the smallest that the largest free block ever got:`low water K B.`
+**Never allocate a block larger than 512 B in Rust except during boot or after ejecting.**
 
 #### Allocated statically at link time
 
-| Consumer                   |      Bytes |                                                                                                     |
-| -------------------------- | ---------: | --------------------------------------------------------------------------------------------------- |
-| `beamer_wbc.c` `s_data`    |     32,768 | the write-back cache: 64 sectors of 512 B                                                           |
-| `beamer_wbc.c` `s_staging` |      8,192 | one flush run, DMA'd straight out of`.bss`                                                          |
-| `beamer_msc.c` `s_ring`    |      8,192 | 512 transfer timings, the CBW→CSW census                                                            |
-| `beamer_log.c` `s_ring`    |      8,192 | the`esp_log` capture that becomes `LOGS/debug_N.txt`. Static - `DEBUG=false` does not give it back. |
-| `lcd.rs` `SCRATCH`         |      7,680 | one 160×24 band of the panel, so rendering never allocates                                          |
-| `http.rs` `SEND_BUF`       |      8,192 | the replay read chunk — see below                                                                   |
-| TinyUSB`_mscd_epbuf`       |      4,096 | `CFG_TUD_MSC_EP_BUFSIZE`                                                                            |
-| `beamer_wbc.c` `s_meta`    |        768 | 64 slot descriptors                                                                                 |
-| everything else            |     ~2,000 | descriptors, fonts, the Shift-JIS table, scalars                                                    |
-| **Total**                  | **~80 KB** |                                                                                                     |
+| Consumer                     |       Bytes |                                                                                                                                                                |
+| ---------------------------- | ----------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `beamer_wbc.c` `s_data`      |      32,768 | the write-back cache:`WBC_SECTORS` = 64 sectors of 512 B                                                                                                       |
+| `beamer_wbc.c` `s_staging`   |       8,192 | one flush run, DMA'd straight out of`.bss`                                                                                                                     |
+| `beamer_msc.c` `s_ring`      |       8,192 | 512 transfer timings, the CBW→CSW census                                                                                                                       |
+| `beamer_log.c` `s_ring`      |       8,192 | the`esp_log` capture that becomes `LOGS/debug_N.txt`, 4,096 B of it kept per boot with the oldest lines dropped. Static - `DEBUG=false` does not give it back. |
+| `lcd.rs` `SCRATCH`           |       7,680 | one 160×24 band of the panel, so rendering never allocates                                                                                                     |
+| `http.rs` `SEND_BUF`         |       8,192 | the replay read chunk — see below                                                                                                                              |
+| `scan.rs` `seen` + `present` |       4,160 | `REPLAY-CAP` name hashes and presence bitmap                                                                                                                   |
+| `http.rs` `BODY_BUF`         |       4,096 | `GET /status` or `GET /SLIPPI/` body                                                                                                                           |
+| `publish.rs` `index_buf`     |       2,560 | replay index json                                                                                                                                              |
+| `errors.rs` `STORE`          |       7,210 | the session, late and previous error blobs at `CAP` each, plus the entry being assembled                                                                       |
+| `reload.rs` `SCRATCH`        |       4,096 | `config.txt`, read into a fixed buffer so an oversized file is rejected rather than allocated                                                                  |
+| `scan.rs` `FAST.game`        |       1,024 | the published game blob, rendered in place by each peek                                                                                                        |
+| `journal.rs` `ENCODE_BUF`    |         861 | the NVS summary blob                                                                                                                                           |
+| TinyUSB`_mscd_epbuf`         |       4,096 | `CFG_TUD_MSC_EP_BUFSIZE`                                                                                                                                       |
+| `beamer_wbc.c` `s_meta`      |         768 | 64 slot descriptors                                                                                                                                            |
+| everything else              |      ~2,000 | descriptors, fonts, the Shift-JIS table, scalars                                                                                                               |
+| **Total**                    | **~105 KB** |                                                                                                                                                                |
 
 #### Allocated once at boot
 
-| Consumer                                                                                                                                                                            |   Bytes |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------: |
-| ESP-IDF's own tasks (main 8,704, TCP/IP 3,584, esp_timer 4,096, event 2,816, IPC ×2 2,560, idle ×2 3,072, FreeRTOS timer 2,048, WiFi ~3,584, mDNS 4,096, httpd 8,192) plus ~13 TCBs | ~53,000 |
-| Firmware tasks: journal log 4,096, scan 8,192, net 8,192, health 6,144, status 4,096. The journal drain's 8,192 joins them only when`DEBUG` is set                                  |  30,720 |
-| C tasks:`beamer_msc` 6,144, `beamer_wbc` 4,096, plus TCBs and six semaphores                                                                                                        | ~12,400 |
-| WiFi pinned RX buffers, 10 × ~1,600                                                                                                                                                 | ~16,000 |
-| WiFi RX management buffers, 5 × ~500                                                                                                                                                |  ~2,500 |
-| mDNS steady state                                                                                                                                                                   |  ~7,000 |
-| NVS page cache                                                                                                                                                                      |  ~3,000 |
-| The read window's FatFs registration                                                                                                                                                |   2,220 |
-| The rendered reset census, two short lines held for the boot                                                                                                                        |    ~250 |
+| Consumer                                                                                                                                                                            |        Bytes |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -----------: |
+| ESP-IDF's own tasks (main 8,704, TCP/IP 3,584, esp_timer 4,096, event 2,816, IPC ×2 2,560, idle ×2 3,072, FreeRTOS timer 2,048, WiFi ~3,584, mDNS 4,096, httpd 8,192) plus ~13 TCBs |      ~53,000 |
+| Firmware tasks: journal log 4,096, scan 8,192, net 8,192, health 6,144, status 4,096. The journal drain's 8,192 joins them only when`DEBUG` is set                                  |       30,720 |
+| C tasks:`beamer_msc` 6,144, `beamer_wbc` 4,096, plus TCBs and six semaphores                                                                                                        |      ~12,400 |
+| WiFi pinned RX buffers, 10 × ~1,600                                                                                                                                                 |      ~16,000 |
+| WiFi RX management buffers, 5 × ~500                                                                                                                                                |       ~2,500 |
+| mDNS steady state                                                                                                                                                                   |       ~7,000 |
+| NVS page cache                                                                                                                                                                      |       ~3,000 |
+| The read window's FatFs registration                                                                                                                                                |        2,220 |
+| The rendered reset census, two short lines held for the boot                                                                                                                        |         ~250 |
+| Journal drain task (only when`DEBUG=true`)                                                                                                                                          |        8,192 |
+| **Total**                                                                                                                                                                           | **~135,000** |
 
-#### Dynamically allocated
+#### Summary
 
-| Allocator                                                                                   |                       Block | Rate                                              |
-| ------------------------------------------------------------------------------------------- | --------------------------: | ------------------------------------------------- |
-| lwIP pcbs, pbufs and tcp_segs — built with`MEMP_MEM_MALLOC=1`, so there are no static pools |            200 B – 32,768 B | continuous, per connection and per packet         |
-| A replay download's TCP send queue —`CONFIG_LWIP_TCP_SND_BUF_DEFAULT`, 23 × MSS             | <=32,768 B in 1,440 B pbufs | held for the length of one`GET /SLIPPI/<file>`    |
-| WiFi dynamic TX buffers, 32 cap                                                             |                    ~1,600 B | per transmit burst                                |
-| mDNS per-packet buffer,`MALLOC_CAP_INTERNAL`                                                |                   <=1,460 B | every multicast on the network                    |
-| FatFs long-filename working buffer                                                          |                       512 B | every`f_open`, `f_opendir`, `f_readdir`, `f_stat` |
-| `vfs_fat_dir_t` for a directory walk                                                        |                      ~330 B | per listing                                       |
-| The scan tick's name-hash vector - the last walk's and the one being built are both live    |  <=16,384 B contiguous each | two per listing                                   |
-| An`OsString` per directory entry                                                            |                       ~40 B | × file count, per listing                         |
-| `GET /status` — the JSON body plus the error array                                          |    <=7,000 B in many pieces | per request                                       |
-
-##### Hard limits
-
-|                         | Limit                                    | Set by                                                                                                                                                                           |
-| ----------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FatFs volumes           | 2                                        | `CONFIG_FATFS_VOLUME_COUNT` — one is held for the boot by the read window                                                                                                        |
-| FatFs sector size       | 512 B                                    | `CONFIG_WL_SECTOR_SIZE_512`; it sizes `FATFS.win[]` and every `FIL.buf[]`, and at 4096 the mount context is 21 KB instead of 2.2 KB                                              |
-| Open files per mount    | 2                                        | `MAX_FILES` in `storage/fat.rs`                                                                                                                                                  |
-| Concurrent HTTP sockets | 4                                        | `esp_http_server`, 192 B of state each. It is one task, so handlers run one at a time and only one send queue is ever full                                                       |
-| TCP send window         | 32,768 B                                 | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT`; window/RTT is the download ceiling, so this is what sets it. `TCP_SND_QUEUELEN` derives from it. `CONFIG_LWIP_TCP_WND_DEFAULT` stays at 5,760 |
-| Write-back cache        | 64 sectors                               | `WBC_SECTORS`; `high water` and `stalls` in `LOGS/debug_N.txt` say whether it is enough                                                                                          |
-| Replays served          | 16                                       | `NUM-REPLAYS-SERVED` ceiling                                                                                                                                                     |
-| Replays counted         | `REPLAY-CAP`, default 512, ceiling 2,048 | `replay_count` saturates at `replay_cap`, both reported in `GET /status`                                                                                                         |
-| Error text kept         | 2,048 B per store                        | then truncated                                                                                                                                                                   |
-| Captured log kept       | 4,096 B                                  | oldest lines dropped                                                                                                                                                             |
-| Journal partition       | 64 KB                                    | `jrnl`, separate from `nvs` so diagnostics cannot exhaust a station's durable state; the reset census adds one 37-byte key, rewritten once per boot                              |
+|                                      |    Bytes |
+| ------------------------------------ | -------: |
+| Available                            |   320 KB |
+| Allocated statically at link time    |  ~105 KB |
+| Allocated once at boot               |  ~135 KB |
+| Free heap at rest                    |   ~64 KB |
+| Largest free block at rest           | ~31.7 KB |
+| Largest free block during a download |  ~1.5 KB |
 
 ### Releasing
 

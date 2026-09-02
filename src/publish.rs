@@ -9,22 +9,26 @@ pub struct Published {
 
 #[derive(Debug, Clone)]
 pub struct PublishedSet {
-    entries: Vec<Published>,
-    index_json: Vec<u8>,
+    entries: heapless::Vec<Published, { crate::config::KEEP_MAX as usize + 1 }>,
+    index_buf: report::Buf<{ report::INDEX_CAP }>,
     station: String,
     cap: usize,
 }
 
 impl PublishedSet {
-    pub fn new(station: String, cap: usize) -> PublishedSet {
-        let mut set = PublishedSet {
-            entries: Vec::new(),
-            index_json: Vec::new(),
-            station,
-            cap: cap.max(1),
-        };
-        set.render();
-        set
+    pub const fn empty() -> PublishedSet {
+        PublishedSet {
+            entries: heapless::Vec::new(),
+            index_buf: report::Buf::new(),
+            station: String::new(),
+            cap: 1,
+        }
+    }
+
+    pub fn init(&mut self, station: String, cap: usize) {
+        self.station = station;
+        self.cap = cap.max(1);
+        self.render();
     }
 
     pub fn admit(&mut self, name: &str, size: u64, at: u64) -> bool {
@@ -32,11 +36,17 @@ impl PublishedSet {
             return false;
         }
 
-        self.entries.push(Published {
-            name: name.to_owned(),
-            size,
-            published_at: at,
-        });
+        if self
+            .entries
+            .push(Published {
+                name: name.to_owned(),
+                size,
+                published_at: at,
+            })
+            .is_err()
+        {
+            return false;
+        }
 
         self.entries.sort_by(|a, b| {
             b.published_at
@@ -53,8 +63,8 @@ impl PublishedSet {
         self.entries.iter().any(|e| e.name == name)
     }
 
-    pub fn index_json(&self) -> &[u8] {
-        &self.index_json
+    pub fn index_str(&self) -> &str {
+        self.index_buf.as_str()
     }
 
     pub fn len(&self) -> usize {
@@ -79,12 +89,20 @@ impl PublishedSet {
     }
 
     fn render(&mut self) {
-        let files: Vec<(String, u64)> = self
-            .entries
-            .iter()
-            .map(|e| (e.name.clone(), e.size))
-            .collect();
-        self.index_json = report::index_json(&self.station, &files);
+        let PublishedSet {
+            entries,
+            index_buf,
+            station,
+            ..
+        } = self;
+        let mut files: heapless::Vec<(&str, u64), { crate::config::KEEP_MAX as usize }> =
+            heapless::Vec::new();
+        for e in entries.iter() {
+            if files.push((e.name.as_str(), e.size)).is_err() {
+                break;
+            }
+        }
+        report::index_json(station, &files, index_buf);
     }
 }
 

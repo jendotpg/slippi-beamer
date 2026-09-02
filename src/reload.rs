@@ -1,3 +1,4 @@
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::config::{Outcome, Settings};
@@ -18,8 +19,39 @@ pub enum Action {
     Restart,
 }
 
+static SCRATCH: Mutex<crate::config::ConfigBytes> = Mutex::new(crate::config::ConfigBytes::new());
+static SEEN: Mutex<u64> = Mutex::new(0);
+
+fn hash(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+fn lock(
+    b: &'static Mutex<crate::config::ConfigBytes>,
+) -> MutexGuard<'static, crate::config::ConfigBytes> {
+    b.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub fn load_initial(path: &str) -> Outcome {
+    let mut scratch = lock(&SCRATCH);
+    match crate::config::read_file(path, &mut scratch) {
+        Ok(()) => {
+            *SEEN.lock().unwrap_or_else(|e| e.into_inner()) = hash(&scratch);
+            Outcome::parse_bytes(&scratch)
+        }
+        Err(e) => {
+            scratch.clear();
+            Outcome::unreadable(format!("{e}"))
+        }
+    }
+}
+
 pub struct Watcher {
-    raw: Vec<u8>,
     settings: Settings,
     plan: Plan,
     quiet_since: Option<Instant>,
@@ -27,9 +59,8 @@ pub struct Watcher {
 }
 
 impl Watcher {
-    pub fn new(raw: Vec<u8>, settings: Settings, plan: Plan) -> Watcher {
+    pub fn new(settings: Settings, plan: Plan) -> Watcher {
         Watcher {
-            raw,
             settings,
             plan,
             quiet_since: None,
@@ -60,22 +91,24 @@ impl Watcher {
                 log::warn!("reload: {PATH} would not read: {why}");
                 Action::None
             }
-            Read::Ok(raw) if raw == self.raw => {
+            Read::Ok
+                if hash(&lock(&SCRATCH)) == *SEEN.lock().unwrap_or_else(|e| e.into_inner()) =>
+            {
                 self.armed = false;
                 Action::None
             }
-            Read::Ok(raw) => {
+            Read::Ok => {
                 self.armed = false;
-                self.apply(raw, station_id)
+                self.apply(station_id)
             }
         }
     }
 
-    fn apply(&mut self, raw: Vec<u8>, station_id: &str) -> Action {
-        let outcome = Outcome::parse_bytes(&raw);
+    fn apply(&mut self, station_id: &str) -> Action {
+        let outcome = Outcome::parse_bytes(&lock(&SCRATCH));
 
         if let Outcome::Rejected(problems) = &outcome {
-            self.raw = raw;
+            promote();
             log::error!(
                 "reload: {} problem(s); the file is rejected whole",
                 problems.len()
@@ -94,7 +127,7 @@ impl Watcher {
 
         let settings = Settings::from(&outcome);
         let plan = Plan::from(&outcome, station_id);
-        self.raw = raw;
+        promote();
 
         // the radio cannot come back from any of these without a re-boot
         if errors::session_has_errors()
@@ -168,7 +201,11 @@ impl Watcher {
 enum Read {
     Busy,
     Failed(String),
-    Ok(Vec<u8>),
+    Ok,
+}
+
+fn promote() {
+    *SEEN.lock().unwrap_or_else(|e| e.into_inner()) = hash(&lock(&SCRATCH));
 }
 
 fn read(sd: &SdCard) -> Read {
@@ -178,8 +215,9 @@ fn read(sd: &SdCard) -> Read {
         Err(e) => return Read::Failed(format!("{e}")),
     };
 
-    match std::fs::read(window.path(PATH)) {
-        Ok(bytes) => Read::Ok(bytes),
+    let mut scratch = lock(&SCRATCH);
+    match crate::config::read_file(&window.path(PATH), &mut scratch) {
+        Ok(()) => Read::Ok,
         Err(e) => Read::Failed(format!("{e}")),
     }
 }

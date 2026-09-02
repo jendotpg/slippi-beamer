@@ -42,6 +42,7 @@ pub fn write_debug(base: &str, _window: &WriteWindow, station_id: &str, reset: &
 
     let mut body = String::with_capacity(1024);
     body.push_str("Beamer debug\n");
+    body.push_str(&format!("firmware {}\n", crate::report::VERSION));
     body.push_str(&format!("station {station_id}\n"));
 
     let boot = unsafe { esp_idf_svc::sys::beamer_boot_count() };

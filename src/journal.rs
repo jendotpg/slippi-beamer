@@ -4,6 +4,7 @@
 //! no formatting or any compute work - this is where the expensive part is
 //! done on a low priority.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use esp_idf_svc::hal::cpu::Core;
@@ -28,6 +29,29 @@ const DRAIN_CHUNK: usize = 64;
 const HEAP_SAMPLE: Duration = Duration::from_millis(200);
 const PERSIST: Duration = Duration::from_secs(10);
 const HEARTBEAT: Duration = Duration::from_secs(60);
+
+const ENCODED: usize =
+    1 + 4 * Summary::WORDS + 9 * WORST + 5 * Summary::UNSUP + 5 * Summary::CENSUS;
+
+type Encoded = heapless::Vec<u8, ENCODED>;
+
+static ENCODE_BUF: std::sync::Mutex<Encoded> = std::sync::Mutex::new(heapless::Vec::new());
+
+fn encode_buf() -> std::sync::MutexGuard<'static, Encoded> {
+    ENCODE_BUF.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+struct PushBytes<'a>(&'a mut Encoded);
+
+impl PushBytes<'_> {
+    fn push(&mut self, b: u8) {
+        let _ = self.0.push(b);
+    }
+
+    fn extend_from_slice(&mut self, b: &[u8]) {
+        let _ = self.0.extend_from_slice(b);
+    }
+}
 
 #[derive(Clone, Copy, Default)]
 struct Outlier {
@@ -170,8 +194,9 @@ impl Summary {
     const UNSUP: usize = 8;
     const CENSUS: usize = 16; // must match BEAMER_MSC_CENSUS
 
-    fn encode(&self) -> Vec<u8> {
-        let mut v = Vec::with_capacity(1 + 4 * Self::WORDS + 9 * WORST);
+    fn encode_into(&self, v: &mut Encoded) {
+        v.clear();
+        let mut v = PushBytes(v);
         v.push(FORMAT);
         for n in [
             self.reads,
@@ -224,7 +249,6 @@ impl Summary {
             v.extend_from_slice(&count.to_le_bytes());
             v.push(op);
         }
-        v
     }
 
     fn decode(b: &[u8]) -> Option<Summary> {
@@ -322,87 +346,107 @@ impl Summary {
         (0..n).map(|i| self.tail[(start + i) % TAIL]).collect()
     }
 
-    fn lines(&self) -> Vec<String> {
-        use std::fmt::Write as _;
+    const LINE_CAP: usize = 1024;
 
-        let mut out = Vec::new();
+    fn for_each_line(&self, mut f: impl FnMut(&str)) {
+        use core::fmt::Write as _;
 
-        out.push(format!(
+        let mut line: heapless::String<{ Self::LINE_CAP }> = heapless::String::new();
+
+        macro_rules! emit {
+            ($($arg:tt)*) => {{
+                line.clear();
+                let _ = write!(line, $($arg)*);
+                f(&line);
+            }};
+        }
+
+        emit!(
             "host: {} mount(s), {} unmount(s), medium {} at the end",
             self.mounts,
             self.umounts,
             if self.host_owns { "held" } else { "released" },
-        ));
-        out.push(format!(
+        );
+        emit!(
             "host: read {} sector(s), wrote {} sector(s), first error 0x{:x}",
-            self.reads_ok, self.writes_ok, self.first_err,
-        ));
+            self.reads_ok,
+            self.writes_ok,
+            self.first_err,
+        );
         let silence = self.uptime_s.saturating_sub(self.last_cbw_s);
         if self.last_cbw_s == 0 {
-            out.push("host: never asked for a transfer".into());
+            emit!("host: never asked for a transfer");
         } else if silence >= 30 {
-            out.push(format!(
+            emit!(
                 "host: WENT QUIET at {}s and asked for nothing for {}s after",
-                self.last_cbw_s, silence
-            ));
+                self.last_cbw_s,
+                silence
+            );
         } else {
-            out.push(format!("host: last asked at {}s", self.last_cbw_s));
+            emit!("host: last asked at {}s", self.last_cbw_s);
         }
-        out.push(format!("host: {} GET MAX LUN", self.maxlun));
+        emit!("host: {} GET MAX LUN", self.maxlun);
         for (op, n) in &self.census {
-            out.push(format!("scsi: 0x{op:02x} {} x{n}", msc::opcode_name(*op)));
+            emit!("scsi: 0x{op:02x} {} x{n}", msc::opcode_name(*op));
         }
-        out.push(format!(
+        emit!(
             "host: eject {}",
             if self.eject_seen {
                 "seen"
             } else {
                 "never seen -- the cable came out"
             },
-        ));
+        );
         if self.unsup.is_empty() {
-            out.push("scsi: no unsupported commands".into());
+            emit!("scsi: no unsupported commands");
         } else {
             for (op, n) in &self.unsup {
-                out.push(format!("scsi: REFUSED opcode 0x{op:02x} x{n}"));
+                emit!("scsi: REFUSED opcode 0x{op:02x} x{n}");
             }
         }
 
         if self.total() == 0 {
-            out.push("timing: nothing recorded".into());
-            return out;
+            emit!("timing: nothing recorded");
+            return;
         }
 
-        out.push(format!(
+        emit!(
             "{} reads, {} writes, {} errors, {} samples dropped, {}s in",
-            self.reads, self.writes, self.errors, self.dropped, self.uptime_s
-        ));
+            self.reads,
+            self.writes,
+            self.errors,
+            self.dropped,
+            self.uptime_s
+        );
         if self.persist_fails > 0 {
-            out.push(format!(
+            emit!(
                 "journal: {} failed write(s) -- the record above is incomplete",
                 self.persist_fails
-            ));
+            );
         }
 
-        out.push(format!(
+        emit!(
             "cache: {} flush(es) for {} host write(s), high water {}/{} sector(s), {} stall(s)",
             self.flushes,
             self.writes,
             self.cache_high_water,
             unsafe { esp_idf_svc::sys::beamer_wbc_capacity() },
             self.cache_stalls,
-        ));
+        );
 
-        let mut heap = format!(
+        line.clear();
+        let _ = write!(
+            line,
             "heap: {} B free, largest block {} B",
             self.heap_free, self.heap_largest
         );
         if self.heap_largest_min > 0 {
-            let _ = write!(heap, ", low water {} B", self.heap_largest_min);
+            let _ = write!(line, ", low water {} B", self.heap_largest_min);
         }
-        out.push(heap);
+        f(&line);
+
         if self.cache_stalls > 0 {
-            out.push("cache: SATURATED -- host writes blocked waiting for the card".into());
+            emit!("cache: SATURATED -- host writes blocked waiting for the card");
         }
 
         for (name, hist) in [
@@ -410,14 +454,17 @@ impl Summary {
             ("write", &self.write_hist),
             ("flush", &self.flush_hist),
         ] {
-            let mut line = String::new();
+            line.clear();
+            let _ = write!(line, "{name} time:");
+            let mut any = false;
             for (i, n) in hist.iter().enumerate() {
                 if *n > 0 {
                     let _ = write!(line, " <{}us:{}", 1u32 << i, n);
+                    any = true;
                 }
             }
-            if !line.is_empty() {
-                out.push(format!("{name} time:{line}"));
+            if any {
+                f(&line);
             }
         }
 
@@ -425,25 +472,32 @@ impl Summary {
             ("read", &self.lba_read_hist),
             ("write", &self.lba_write_hist),
         ] {
-            let mut line = String::new();
+            line.clear();
+            let _ = write!(line, "{name} where:");
+            let mut any = false;
             for (i, n) in hist.iter().enumerate() {
                 if *n > 0 {
                     let _ = write!(line, " <lba{}:{}", 1u64 << i, n);
+                    any = true;
                 }
             }
-            if !line.is_empty() {
-                out.push(format!("{name} where:{line}"));
+            if any {
+                f(&line);
             }
         }
 
         let tail = self.tail_lbas();
         if !tail.is_empty() {
-            let l: Vec<String> = tail.iter().map(|v| v.to_string()).collect();
-            out.push(format!("last writes: {}", l.join(" ")));
+            line.clear();
+            let _ = write!(line, "last writes:");
+            for v in &tail {
+                let _ = write!(line, " {v}");
+            }
+            f(&line);
         }
 
         for o in self.worst.iter().filter(|o| o.dur_us > 0) {
-            out.push(format!(
+            emit!(
                 "worst: {}us {} lba {}",
                 o.dur_us,
                 match o.op {
@@ -452,16 +506,13 @@ impl Summary {
                     _ => "read",
                 },
                 o.lba
-            ));
+            );
         }
-        out
     }
 
     fn report(&self, when: &str) {
         log::info!("msc timing ({when}):");
-        for l in self.lines() {
-            log::info!("  {l}");
-        }
+        self.for_each_line(|l| log::info!("  {l}"));
     }
 }
 
@@ -702,6 +753,22 @@ pub fn heap_now() -> (u32, u32) {
     (free, largest as u32)
 }
 
+static HEAP_LOW: AtomicU32 = AtomicU32::new(u32::MAX);
+
+pub fn heap_checkin() {
+    let (_, largest) = heap_now();
+    HEAP_LOW.fetch_min(largest, Ordering::Relaxed);
+}
+
+pub fn heap_low() -> u32 {
+    let v = HEAP_LOW.load(Ordering::Relaxed);
+    if v == u32::MAX {
+        heap_now().1
+    } else {
+        v
+    }
+}
+
 #[allow(non_upper_case_globals)]
 pub fn reset_name(raw: u32) -> &'static str {
     use esp_idf_svc::sys::*;
@@ -768,10 +835,11 @@ fn prev() -> &'static std::sync::Mutex<Option<Summary>> {
 }
 
 pub fn previous_lines() -> Vec<String> {
-    match prev().lock().unwrap().as_ref() {
-        Some(s) => s.lines(),
-        None => Vec::new(),
+    let mut out = Vec::new();
+    if let Some(s) = prev().lock().unwrap().as_ref() {
+        s.for_each_line(|l| out.push(l.to_owned()));
     }
+    out
 }
 
 static ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
@@ -1062,13 +1130,15 @@ pub fn spawn() -> anyhow::Result<()> {
             let started = Instant::now();
 
             if let Some(nvs) = nvs.as_mut() {
-                if let Err(e) = nvs.set_blob(KEY, &Summary::default().encode()) {
+                let mut blob = encode_buf();
+                Summary::default().encode_into(&mut blob);
+                if let Err(e) = nvs.set_blob(KEY, &blob) {
                     log::warn!("msc timing: could not claim the key: {e}");
                 }
             }
 
             let mut last_persist = Instant::now();
-            let (_, mut heap_low) = heap_now();
+            heap_checkin();
             let mut last_heap = Instant::now();
             let mut dirty = false;
             let mut last_counters = (0u32, 0u32, 0u32, 0u32, 0i32, false, false);
@@ -1087,8 +1157,7 @@ pub fn spawn() -> anyhow::Result<()> {
 
                 if last_heap.elapsed() >= HEAP_SAMPLE {
                     last_heap = Instant::now();
-                    let (_, largest) = heap_now();
-                    heap_low = heap_low.min(largest);
+                    heap_checkin();
                 }
 
                 let counters = (
@@ -1128,10 +1197,12 @@ pub fn spawn() -> anyhow::Result<()> {
                     let (free, largest) = heap_now();
                     summary.heap_free = free;
                     summary.heap_largest = largest;
-                    heap_low = heap_low.min(largest);
-                    summary.heap_largest_min = heap_low;
+                    HEAP_LOW.fetch_min(largest, Ordering::Relaxed);
+                    summary.heap_largest_min = heap_low();
                     if let Some(nvs) = nvs.as_mut() {
-                        if let Err(e) = nvs.set_blob(KEY, &summary.encode()) {
+                        let mut blob = encode_buf();
+                        summary.encode_into(&mut blob);
+                        if let Err(e) = nvs.set_blob(KEY, &blob) {
                             log::warn!("msc timing: persist failed: {e}");
                             summary.persist_fails += 1;
                         }

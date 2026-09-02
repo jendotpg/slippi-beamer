@@ -7,6 +7,7 @@
 //! Note also that this can't cover a panic in the status task handler, so
 //! don't panic there!
 
+use core::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -15,6 +16,17 @@ use crate::journal;
 use crate::status::ErrorLabel;
 
 static IN_PANIC: AtomicBool = AtomicBool::new(false);
+
+struct OneLine<'a, const N: usize>(&'a mut heapless::String<N>);
+
+impl<const N: usize> core::fmt::Write for OneLine<'_, N> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for c in s.chars() {
+            let _ = self.0.push(if c == '\n' { ' ' } else { c });
+        }
+        Ok(())
+    }
+}
 
 pub fn install() {
     std::panic::set_hook(Box::new(|info| {
@@ -25,8 +37,11 @@ pub fn install() {
             return;
         }
 
-        let head = format!("in task {}", task_name());
-        let detail = info.to_string().replace('\n', " ");
+        let mut head: heapless::String<64> = heapless::String::new();
+        let _ = write!(head, "in task {}", task_name());
+
+        let mut detail: heapless::String<256> = heapless::String::new();
+        let _ = write!(OneLine(&mut detail), "{info}");
 
         let mut frames = [0u8; 256];
         let n = unsafe {
@@ -35,7 +50,9 @@ pub fn install() {
                 frames.len(),
             )
         };
-        let backtrace = format!(
+        let mut backtrace: heapless::String<320> = heapless::String::new();
+        let _ = write!(
+            backtrace,
             "backtrace {}",
             String::from_utf8_lossy(&frames[..n.min(frames.len())])
         );
