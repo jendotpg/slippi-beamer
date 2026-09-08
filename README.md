@@ -5,13 +5,15 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 ## TODO:
 
 1. when losing wifi live, throw an error! it just silently stops working btu stays green :(
-2. read-ahead cache? this is probably the best way to get faster downloads...
+2. when `config.txt`is too big, throw an error! just silently fails
+3. read-ahead cache? this is probably the best way to get faster downloads...
    1. idk if theres enough memory tbh....
 
-3. support other boards with different pinouts? different build options, maybe?
+4. when "busy" but theres a warning - blink amber instead of solid amber!!
+5. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-4. colorblind mode? blue instead of amber?
+6. colorblind mode? blue instead of amber?
 
 ## Configuring a station
 
@@ -214,13 +216,14 @@ Hold the button on the side of the board while plugging it in to enter download 
 
 ### Warning labels
 
-| Label           | What is off                                                                                              |
-| --------------- | -------------------------------------------------------------------------------------------------------- |
-| `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.             |
-| `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served. Delete some.                        |
-| `NO WII`        | Nothing has read this drive in ten seconds — a charger, a dead port, or a console that never mounted it. |
-| `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.      |
-| `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.                    |
+| Label           | What is off                                                                                                                |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.                               |
+| `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served. Delete some.                                          |
+| `NO WII`        | Nothing has read this drive in ten seconds — a charger, a dead port, or a console that never mounted it.                   |
+| `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.                        |
+| `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.                                      |
+| `WEAK LINK`     | The wifi is too weak to move replays. The station still tries to operate as normal - but downloads will probably time out. |
 
 ### A warning about FAT cache
 
@@ -260,7 +263,7 @@ Everything else — serving replays over HTTP, counting files, peeking at the ga
 | `scan.rs` `seen` + `present` |       4,160 | `REPLAY-CAP` name hashes and presence bitmap                                                                                                                   |
 | `http.rs` `BODY_BUF`         |       4,096 | `GET /status` or `GET /SLIPPI/` body                                                                                                                           |
 | `publish.rs` `index_buf`     |       2,560 | replay index json                                                                                                                                              |
-| `errors.rs` `STORE`          |       7,210 | the session, late and previous error blobs at `CAP` each, plus the entry being assembled                                                                       |
+| `errors.rs` `STORE`          |       7,210 | the session, late and previous error blobs at`CAP` each, plus the entry being assembled                                                                        |
 | `reload.rs` `SCRATCH`        |       4,096 | `config.txt`, read into a fixed buffer so an oversized file is rejected rather than allocated                                                                  |
 | `scan.rs` `FAST.game`        |       1,024 | the published game blob, rendered in place by each peek                                                                                                        |
 | `journal.rs` `ENCODE_BUF`    |         861 | the NVS summary blob                                                                                                                                           |
@@ -294,7 +297,7 @@ Everything else — serving replays over HTTP, counting files, peeking at the ga
 | Allocated once at boot               |  ~135 KB |
 | Free heap at rest                    |   ~64 KB |
 | Largest free block at rest           | ~31.7 KB |
-| Largest free block during a download |  ~1.5 KB |
+| Largest free block during a download |  ~1.2 KB |
 
 ### Releasing
 

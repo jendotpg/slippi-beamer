@@ -56,12 +56,14 @@ pub enum WarningLabel {
     NoHost,
     SlpMisformat,
     DriveFilling,
+    WeakLink,
 }
 
-pub const WARNINGS: [WarningLabel; 5] = [
+pub const WARNINGS: [WarningLabel; 6] = [
     WarningLabel::DriveFailing,
     WarningLabel::DriveFull,
     WarningLabel::NoHost,
+    WarningLabel::WeakLink,
     WarningLabel::SlpMisformat,
     WarningLabel::DriveFilling,
 ];
@@ -74,16 +76,18 @@ impl WarningLabel {
             WarningLabel::NoHost => "NO WII",
             WarningLabel::SlpMisformat => "SLP MISFORMAT",
             WarningLabel::DriveFilling => "DRIVE FILLING",
+            WarningLabel::WeakLink => "WEAK LINK",
         }
     }
 
     pub fn reason(self) -> &'static str {
         match self {
-            WarningLabel::DriveFailing => "cannot read the card -- replays are still recorded",
-            WarningLabel::DriveFull => "new replays are not served -- delete some",
-            WarningLabel::NoHost => "nothing has read this drive -- check the USB port",
-            WarningLabel::SlpMisformat => "a replay will not parse -- it is not served",
+            WarningLabel::DriveFailing => "cannot read the card",
+            WarningLabel::DriveFull => "new replays are not served",
+            WarningLabel::NoHost => "not plugged into wii or pc",
+            WarningLabel::SlpMisformat => "a replay is formatted incorrectly",
             WarningLabel::DriveFilling => "delete replays from the card soon",
+            WarningLabel::WeakLink => "the wifi connection is poor",
         }
     }
 

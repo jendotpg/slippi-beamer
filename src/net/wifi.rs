@@ -15,6 +15,7 @@ use esp_idf_svc::wifi::{
 };
 
 use crate::status::{self, ErrorLabel, Net};
+use crate::warnings::{self, WarningLabel};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Join {
@@ -267,6 +268,37 @@ fn sample_link() {
     };
 
     *LINK.lock().unwrap_or_else(|e| e.into_inner()) = Some(Link { rssi, phy, channel });
+    update_weak_link(rssi);
+}
+
+const WEAK_ON: i32 = -70;
+const WEAK_OFF: i32 = -65;
+const WEAK_RUN: u32 = 3;
+
+fn update_weak_link(rssi: i32) {
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+    static WEAK: AtomicBool = AtomicBool::new(false);
+    static RUN: AtomicU32 = AtomicU32::new(0);
+
+    let weak = WEAK.load(Ordering::Relaxed);
+    let crossed = if weak {
+        rssi > WEAK_OFF
+    } else {
+        rssi < WEAK_ON
+    };
+
+    if !crossed {
+        RUN.store(0, Ordering::Relaxed);
+        return;
+    }
+    if RUN.fetch_add(1, Ordering::Relaxed) + 1 < WEAK_RUN {
+        return;
+    }
+
+    RUN.store(0, Ordering::Relaxed);
+    WEAK.store(!weak, Ordering::Relaxed);
+    warnings::set(WarningLabel::WeakLink, !weak);
 }
 
 fn associated_ssid() -> Option<String> {
