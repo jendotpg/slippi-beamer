@@ -7,19 +7,15 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 1. implement gzip compression :)
    1. update wifi link limits
 
-2. flip color meanings - amber means warning, blinking means busy!
-   1. make boot green blink, too
-   2. states change: Idle -> HealthyIdle, Busy -> HealthyBusy, split warning into WarningIdle and WarningBusy.
-
-3. when `config.txt`is too big, throw an error! just silently fails
-4. support other boards with different pinouts? different build options, maybe?
+2. hardware research: whats the right ap to use? is the pi gonna actually do better under the same network conditions?
+3. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-5. colorblind mode? blue instead of amber?
+4. colorblind mode? blue instead of amber?
 
 ## Configuring a station
 
-`CONFIG/config.txt` on the `BEAMER` drive is the only thing a TO ever edits. The Beamer reads it in full at every boot and again after you edit it. Keys are case-insensitive, blank lines and `#` comments are ignored, and values may be quoted.
+`CONFIG/config.txt` on the `BEAMER` drive is the only thing a TO ever edits. The Beamer reads it in full at every boot and again after you edit it. Keys are case-insensitive, blank lines and `#` comments are ignored, and values may be quoted. Config files larger than 4kb are rejected.
 
 | Key                  | Default        | What it does                                                                                                                                                                |
 | -------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -29,7 +25,7 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 | `HIDDEN`             | `false`        | Whether the network broadcasts its name.                                                                                                                                    |
 | `STATION-NAME`       | the station ID | What to call this station. Appears as`station_name` in `GET /status`, and as the station's hostname (slugged - see [Station Identity](#station-identity)).                  |
 | `NUM-REPLAYS-SERVED` | `10`           | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                                    |
-| `REPLAY-CAP`         | `512`          | How many replays the station counts on the card before it stops counting. 1 to 2048. Past 75% it warns; at the cap it warns and stops serving new replays.                  |
+| `REPLAY-CAP`         | `512`          | How many replays the station counts on the card before it stops counting. 1 to 512. Past 75% it warns; at the cap it warns and stops serving new replays.                   |
 | `LED-BRIGHTNESS`     | `20`           | The status LED, 0 to 100 percent.                                                                                                                                           |
 | `FLIP-SCREEN`        | `false`        | Whether the screen starts rotated 180 degrees. The button on the side of the dongle flips it either way at any time.                                                        |
 | `DEBUG`              | `false`        | Whether to keep a`LOGS/debug_0001.txt` of each boot, numbered upward from there. Off means the journal records nothing at all. These files are never deleted automatically. |
@@ -38,17 +34,16 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 A Beamer's screen and LED are live readouts of station health. They are the fastest way — and usually the only way — to tell whether a Beamer is actually working. If the screen is upside down, press the button on the side of the dongle. You can configure this in `config.txt` if you want it to remember after a reboot.
 
-**Amber means something is happening — DO NOT UNPLUG.**
+**Blinking means something is happening - DO NOT UNPLUG.**
 
-| Screen                                                               | LED Pattern                                          | Meaning                                                                           | Safe to Unplug? |
-| -------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------- | --------------- |
-| An indeterminate loading circle, one rotation per second             | Slow even blink, about once a second (**amber**)     | Booting.                                                                          | no              |
-| `WRITING` or `SENDING`, with moving dots, over `DO NOT UNPLUG`       | Solid (**amber**)                                    | Busy. A game is being recorded, or a file is being served.                        | no              |
-| The station name, large. IP and how full the card is beneath it.     | Solid (**green**)                                    | Healthy and idle. Everything is on the card.                                      | yes             |
-| A warning label, large. One line of advice, then the station name.   | Slow even blink, about once a second (**green**)     | Working but with a warning.                                                       | yes             |
-| The error label, large. One line of detail, then where to read more. | Fast even blink, about five times a second (**red**) | Something went wrong (or this is a freshly flashed Beamer on its first boot).     | yes             |
-| Dark, backlight off                                                  | Dark                                                 | Ejected and shut down.                                                            | yes             |
-| Dark, backlight off                                                  | Solid (**red**)                                      | Stopped. It hit a fault it could not recover from. Unplug it and plug it back in. | yes             |
+| Screen                                                         | LED Pattern                       | Meaning                                                        | Safe to Unplug? |
+| -------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------- | --------------- |
+| Loading circle                                                 | Blinking (**green**)              | Booting.                                                       | no              |
+| Station name                                                   | Solid (**green**)                 | Healthy and idle.                                              | yes             |
+| Warning label                                                  | Solid (**amber**)                 | Warning and idle.                                              | yes             |
+| `WRITING` or `SENDING`, with moving dots, over `DO NOT UNPLUG` | Blinking (**green** or **amber**) | Doing something - don't unplug. If amber, there's a warning :P | no              |
+| Error label                                                    | Solid (**red**)                   | Unhealthy.                                                     | yes             |
+| Dark, backlight off                                            | Solid (**red** or **off**)        | Stopped.                                                       | yes             |
 
 **Ejecting a Beamer shuts it down for good.** It flushes the card, leaves the network, drops off the USB bus and sleeps. Unplugging and replugging it is the only way to bring it back.
 
@@ -72,7 +67,7 @@ The screen shows only the first error of the boot, with`+N more` beneath it when
 | Item                        | Detail                                                                                                                                                                                                                                             | Where I Source Them                                                                                                                    |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | LilyGO T-Dongle-S3 with LCD | ESP32-S3 with 16 MB flash. Native 4-bit SDMMC, native USB OTG on a USB-A male plug, an addressable RGB status LED, a 0.96" 160×80 colour screen, and a transparent case. Get the variant with the screen if you can afford the extra dollar or so! | [www.amazon.com/dp/B0BK9162QY](https://www.amazon.com/dp/B0BK9162QY?lv=shuf&channelId=500&plpRedirect=mhFallback&th=1)                 |
-| microSD card                | Any size from 4 GB up, but format the replay partition to 4 GB with 4 KB clusters — see[Card size](#card-size).                                                                                                                                    | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793) |
+| microSD card                | Any size from 4 GB up, but format the replay partition to 4 GB with 4 KB clusters — see [Card size](#card-size).                                                                                                                                   | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793) |
 
 Depending on venue and size of fleet, you may need to buy a separate router as well - not all WiFi networks can handle an extra 20 devices and very few can handle an extra 80! I use [The GL.Inet Flint 2](https://www.gl-inet.com/en-us/products/gl-mt6000) (~$170 at time of writing). One thing to note: **ESP32-S3 is 2.4 GHz only.** Maybe sometime soon we'll see a company selling the ESP32-S31 in the dongle form factor and move over - 5 GHz and WiFi 6 would lowkey be a godsend...
 

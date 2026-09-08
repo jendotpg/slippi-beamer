@@ -21,21 +21,23 @@ pub use labels::{ErrorLabel, WarningLabel};
 #[repr(u8)]
 pub enum State {
     Booting = 0,
-    Idle = 1,
+    HealthyIdle = 1,
     Error = 2,
     Off = 3,
-    Busy = 4,
-    Warning = 5,
+    HealthyBusy = 4,
+    WarningIdle = 5,
+    WarningBusy = 6,
 }
 
 impl State {
     fn from_u8(v: u8) -> State {
         match v {
-            1 => State::Idle,
+            1 => State::HealthyIdle,
             2 => State::Error,
             3 => State::Off,
-            4 => State::Busy,
-            5 => State::Warning,
+            4 => State::HealthyBusy,
+            5 => State::WarningIdle,
+            6 => State::WarningBusy,
             _ => State::Booting,
         }
     }
@@ -85,6 +87,24 @@ pub fn set(state: State) {
 
 pub fn get() -> State {
     State::from_u8(STATE.load(Ordering::Relaxed))
+}
+
+/// The busy state that matches the warnings standing right now.
+pub fn busy_now() -> State {
+    if crate::warnings::any() {
+        State::WarningBusy
+    } else {
+        State::HealthyBusy
+    }
+}
+
+/// The idle state that matches the warnings standing right now.
+pub fn idle_now() -> State {
+    if crate::warnings::any() {
+        State::WarningIdle
+    } else {
+        State::HealthyIdle
+    }
 }
 
 pub fn painted() -> State {
@@ -144,8 +164,7 @@ pub(crate) fn set_warning(warn: Option<WarningLabel>, more: u32) {
 }
 
 const TICK: Duration = Duration::from_millis(20);
-const BOOT_HALF_MS: u64 = 500; // ~1 Hz
-const ERROR_HALF_MS: u64 = 100; // ~5 Hz
+const BUSY_HALF_MS: u64 = 500; // ~1 Hz
 const DEBOUNCE_TICKS: u8 = 3; // 60 ms at TICK
 
 pub const SPINNER_STEPS: u64 = 12;
@@ -155,15 +174,17 @@ pub const DOTS_MAX: u64 = 3;
 
 fn led_bright(state: State, ms: u64) -> bool {
     match state {
-        State::Booting | State::Warning => (ms / BOOT_HALF_MS).is_multiple_of(2),
-        State::Error => (ms / ERROR_HALF_MS).is_multiple_of(2),
+        // Blinking means busy.
+        State::Booting | State::HealthyBusy | State::WarningBusy => {
+            (ms / BUSY_HALF_MS).is_multiple_of(2)
+        }
         // Solid, in their own colours. `Off` never reads this.
-        State::Idle | State::Busy | State::Off => true,
+        State::HealthyIdle | State::WarningIdle | State::Error | State::Off => true,
     }
 }
 
 fn spinner_frame(ms: u64) -> u64 {
-    (ms % (BOOT_HALF_MS * 2)) * SPINNER_STEPS / (BOOT_HALF_MS * 2)
+    (ms % (BUSY_HALF_MS * 2)) * SPINNER_STEPS / (BUSY_HALF_MS * 2)
 }
 
 fn dots_frame(ms: u64) -> u64 {
@@ -324,7 +345,7 @@ fn render(pins: Pins) {
                         last_frame = frame;
                     }
                 }
-                State::Busy => {
+                State::HealthyBusy | State::WarningBusy => {
                     let frame = dots_frame(ms);
                     if frame != last_frame {
                         lcd.dots(&local, frame);

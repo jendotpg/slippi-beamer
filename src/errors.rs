@@ -230,7 +230,7 @@ and restarts itself if the fix is one it cannot apply while running.
 There is no need to eject - ejecting shuts the station down for good.
 
 This file can be up to one boot behind. The LED and the screen never are: if the
-LED is SOLID and the screen shows this station's name, the station is working
+LED is GREEN and the screen shows this station's name, the station is working
 right now!
 ";
 

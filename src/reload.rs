@@ -1,7 +1,7 @@
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use crate::config::{Outcome, Settings};
+use crate::config::{ConfigError, Outcome, ReadError, Settings};
 use crate::errors::{self, Target};
 use crate::net::{self, check, NetResult, Plan};
 use crate::scan;
@@ -44,7 +44,11 @@ pub fn load_initial(path: &str) -> Outcome {
             *SEEN.lock().unwrap_or_else(|e| e.into_inner()) = hash(&scratch);
             Outcome::parse_bytes(&scratch)
         }
-        Err(e) => {
+        Err(ReadError::TooBig { len }) => {
+            scratch.clear();
+            Outcome::Rejected(vec![ReadError::too_big(len)])
+        }
+        Err(ReadError::Io(e)) => {
             scratch.clear();
             Outcome::unreadable(format!("{e}"))
         }
@@ -86,9 +90,14 @@ impl Watcher {
 
         match read(sd) {
             Read::Busy => Action::None, // a transfer has the volume; try again next tick
-            Read::Failed(why) => {
+            Read::Unavailable(why) => {
                 self.armed = false;
-                log::warn!("reload: {PATH} would not read: {why}");
+                log::warn!("reload: the volume would not open: {why}");
+                Action::None
+            }
+            Read::Failed(e) => {
+                self.armed = false;
+                report(e);
                 Action::None
             }
             Read::Ok
@@ -200,8 +209,22 @@ impl Watcher {
 
 enum Read {
     Busy,
-    Failed(String),
+    Unavailable(String), // the volume, not the file
+    Failed(ReadError),
     Ok,
+}
+
+fn report(e: ReadError) {
+    let (label, problem) = match e {
+        ReadError::TooBig { len } => (ErrorLabel::BadConfig, ReadError::too_big(len)),
+        ReadError::Io(e) => (
+            ErrorLabel::NoConfig,
+            ConfigError::unreadable(format!("CONFIG/config.txt could not be re-read: {e}")),
+        ),
+    };
+    log::error!("reload: {problem}");
+    let [head, detail] = problem.lines();
+    errors::error(Target::Late, label, "config", &[head, detail]);
 }
 
 fn promote() {
@@ -212,12 +235,12 @@ fn read(sd: &SdCard) -> Read {
     let window = match ReadWindow::try_open(sd) {
         Ok(Some(w)) => w,
         Ok(None) => return Read::Busy,
-        Err(e) => return Read::Failed(format!("{e}")),
+        Err(e) => return Read::Unavailable(format!("{e}")),
     };
 
     let mut scratch = lock(&SCRATCH);
     match crate::config::read_file(&window.path(PATH), &mut scratch) {
         Ok(()) => Read::Ok,
-        Err(e) => Read::Failed(format!("{e}")),
+        Err(e) => Read::Failed(e),
     }
 }

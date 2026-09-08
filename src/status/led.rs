@@ -65,8 +65,8 @@ impl<'d> Led<'d> {
         }
 
         let (r, g, b) = match state {
-            State::Booting | State::Busy => AMBER,
-            State::Idle | State::Warning => GREEN,
+            State::Booting | State::HealthyIdle | State::HealthyBusy => GREEN,
+            State::WarningIdle | State::WarningBusy => AMBER,
             State::Error => RED,
             State::Off => DARK,
         };

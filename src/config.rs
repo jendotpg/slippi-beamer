@@ -11,19 +11,37 @@ pub const CONFIG_MAX: usize = 4096;
 
 pub type ConfigBytes = heapless::Vec<u8, CONFIG_MAX>;
 
-pub fn read_file(path: &str, out: &mut ConfigBytes) -> std::io::Result<()> {
+#[derive(Debug)]
+pub enum ReadError {
+    TooBig { len: usize },
+    Io(std::io::Error),
+}
+
+impl ReadError {
+    pub fn too_big(len: usize) -> ConfigError {
+        ConfigError::new(
+            format!("CONFIG/config.txt is {len} bytes; the maximum is {CONFIG_MAX}."),
+            "Delete some lines and save it again.",
+        )
+    }
+}
+
+impl From<std::io::Error> for ReadError {
+    fn from(e: std::io::Error) -> ReadError {
+        ReadError::Io(e)
+    }
+}
+
+pub fn read_file(path: &str, out: &mut ConfigBytes) -> Result<(), ReadError> {
     use std::io::Read as _;
 
     let len = std::fs::metadata(path)?.len() as usize;
     if len > CONFIG_MAX {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("config.txt is {len} bytes; the maximum is {CONFIG_MAX}"),
-        ));
+        return Err(ReadError::TooBig { len });
     }
     out.clear();
     let _ = out.resize(len, 0);
-    std::fs::File::open(path)?.read_exact(out)
+    Ok(std::fs::File::open(path)?.read_exact(out)?)
 }
 
 pub const REPLAY_CAP_DEFAULT: u32 = 512;
@@ -48,6 +66,13 @@ impl ConfigError {
             summary: summary.into(),
             detail,
         }
+    }
+
+    pub fn unreadable(summary: impl Into<String>) -> ConfigError {
+        ConfigError::new(
+            summary,
+            "The station is still running the settings it booted with.",
+        )
     }
 
     pub fn lines(&self) -> [&str; 2] {

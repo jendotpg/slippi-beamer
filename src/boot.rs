@@ -186,13 +186,11 @@ pub fn run() -> anyhow::Result<()> {
         } else if errors::session_has_errors() {
             State::Error
         } else if is_writing || is_sending {
-            State::Busy
+            status::busy_now()
         } else if !settled || (net::result() == net::NetResult::Pending && usb_ok) {
             State::Booting
-        } else if warnings::any() {
-            State::Warning
         } else if usb_ok {
-            State::Idle
+            status::idle_now()
         } else {
             State::Booting
         };
@@ -312,7 +310,7 @@ fn eject(sd: &SdCard, id: &StationId) {
     log::info!("host ejected: flushing");
 
     status::set_activity(true, false);
-    status::set(State::Busy);
+    status::set(status::busy_now());
 
     if let Err(e) = flush_fully() {
         let detail = format!("{} sector(s) still dirty: {e}", storage::msc::cache_dirty());
@@ -395,7 +393,7 @@ fn flush_before_sleep(sd: &SdCard, id: &StationId) {
 
     log::warn!("{dirty} sector(s) still dirty: retrying before sleep");
     status::set_activity(true, false);
-    status::set(State::Busy);
+    status::set(status::busy_now());
 
     if let Err(e) = flush_fully() {
         let detail = format!("{} sector(s) lost: {e}", storage::msc::cache_dirty());
@@ -433,7 +431,7 @@ fn reloaded() -> bool {
 
 fn restart() -> ! {
     log::info!("reload: restarting to pick up the new config");
-    status::set(State::Busy);
+    status::set(status::busy_now());
 
     drain();
     net::shut_down(NET_DOWN_TIMEOUT);
@@ -766,7 +764,7 @@ const CONFIG_TEMPLATE: &str = "\
 # NUM-REPLAYS-SERVED how many of the newest replays this station hands out over
 #                    HTTP. 1 to 16.
 # REPLAY-CAP         how many replays this station counts on the card before it
-#                    stops counting. 1 to 2048.
+#                    stops counting. 1 to 512.
 # LED-BRIGHTNESS     0 to 100 percent. 0 turns the status LED off completely -
 #                    the screen then becomes the only readout.
 # FLIP-SCREEN        true or false - whether the screen starts rotated 180

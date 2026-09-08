@@ -49,16 +49,18 @@ const fn rgb565(r: u8, g: u8, b: u8) -> u16 {
 const BLACK: u16 = 0x0000;
 const WHITE: u16 = rgb565(255, 255, 255);
 const GREY: u16 = rgb565(128, 128, 128);
-const GREEN: u16 = rgb565(0, 255, 0);
+const GREEN_RGB: (u8, u8, u8) = (0, 255, 0);
+const GREEN: u16 = rgb565(GREEN_RGB.0, GREEN_RGB.1, GREEN_RGB.2);
 const RED: u16 = rgb565(255, 0, 0);
 const AMBER_RGB: (u8, u8, u8) = (255, 140, 0);
 const AMBER: u16 = rgb565(AMBER_RGB.0, AMBER_RGB.1, AMBER_RGB.2);
 
+// The spinner's fading tail.
 const fn dim(level: u32) -> u16 {
     rgb565(
-        (AMBER_RGB.0 as u32 * level / 255) as u8,
-        (AMBER_RGB.1 as u32 * level / 255) as u8,
-        (AMBER_RGB.2 as u32 * level / 255) as u8,
+        (GREEN_RGB.0 as u32 * level / 255) as u8,
+        (GREEN_RGB.1 as u32 * level / 255) as u8,
+        (GREEN_RGB.2 as u32 * level / 255) as u8,
     )
 }
 
@@ -337,10 +339,10 @@ impl<'d> Lcd<'d> {
 
         match state {
             State::Booting => {}
-            State::Idle => self.idle(d),
-            State::Warning => self.warning(d),
+            State::HealthyIdle => self.idle(d),
+            State::WarningIdle => self.warning(d),
             State::Error => self.error(d),
-            State::Busy => self.busy(d),
+            State::HealthyBusy | State::WarningBusy => self.busy(d),
             State::Off => unreachable!(),
         }
     }
@@ -386,15 +388,15 @@ impl<'d> Lcd<'d> {
             } else {
                 Self::BUSY_Y2
             };
-            self.text(y, 2, line.as_str(), AMBER, BLACK);
+            self.text(y, 2, line.as_str(), WHITE, BLACK);
             used += 1;
         }
 
         if used == 0 {
-            self.text(Self::BUSY_Y, 2, " ", AMBER, BLACK);
+            self.text(Self::BUSY_Y, 2, " ", WHITE, BLACK);
         }
         if used <= 1 {
-            self.text(Self::BUSY_Y2, 2, " ", AMBER, BLACK);
+            self.text(Self::BUSY_Y2, 2, " ", WHITE, BLACK);
         }
     }
 
@@ -546,7 +548,7 @@ impl<'d> Lcd<'d> {
         for i in 0..SPINNER_STEPS {
             let behind = (SPINNER_STEPS + frame - i) % SPINNER_STEPS;
             let color = match behind {
-                0 => AMBER,
+                0 => GREEN,
                 1 => dim(170),
                 2 => dim(110),
                 3 => dim(60),

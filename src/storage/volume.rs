@@ -107,11 +107,11 @@ out of a Wii, you can see what happened while it was on that Wii.
 ";
 
 pub fn wipe_replays(sd: &super::SdCard) -> Result<u32, String> {
-    use crate::status::{self, State};
+    use crate::status;
 
     let previous = status::get();
     status::set_activity(true, false);
-    status::set(State::Busy);
+    status::set(status::busy_now());
 
     let result = wipe_inner(sd);
 
