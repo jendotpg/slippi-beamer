@@ -20,7 +20,17 @@ pub enum Action {
 }
 
 static SCRATCH: Mutex<crate::config::ConfigBytes> = Mutex::new(crate::config::ConfigBytes::new());
-static SEEN: Mutex<u64> = Mutex::new(0);
+static SEEN: Mutex<Seen> = Mutex::new(Seen::Unknown);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Seen {
+    Unknown,
+    Parsed(u64),
+}
+
+fn seen() -> MutexGuard<'static, Seen> {
+    SEEN.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn hash(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -41,15 +51,17 @@ pub fn load_initial(path: &str) -> Outcome {
     let mut scratch = lock(&SCRATCH);
     match crate::config::read_file(path, &mut scratch) {
         Ok(()) => {
-            *SEEN.lock().unwrap_or_else(|e| e.into_inner()) = hash(&scratch);
+            *seen() = Seen::Parsed(hash(&scratch));
             Outcome::parse_bytes(&scratch)
         }
         Err(ReadError::TooBig { len }) => {
             scratch.clear();
+            *seen() = Seen::Unknown;
             Outcome::Rejected(vec![ReadError::too_big(len)])
         }
         Err(ReadError::Io(e)) => {
             scratch.clear();
+            *seen() = Seen::Unknown;
             Outcome::unreadable(format!("{e}"))
         }
     }
@@ -97,12 +109,11 @@ impl Watcher {
             }
             Read::Failed(e) => {
                 self.armed = false;
+                *seen() = Seen::Unknown;
                 report(e);
                 Action::None
             }
-            Read::Ok
-                if hash(&lock(&SCRATCH)) == *SEEN.lock().unwrap_or_else(|e| e.into_inner()) =>
-            {
+            Read::Ok if *seen() == Seen::Parsed(hash(&lock(&SCRATCH))) => {
                 self.armed = false;
                 Action::None
             }
@@ -228,7 +239,7 @@ fn report(e: ReadError) {
 }
 
 fn promote() {
-    *SEEN.lock().unwrap_or_else(|e| e.into_inner()) = hash(&lock(&SCRATCH));
+    *seen() = Seen::Parsed(hash(&lock(&SCRATCH)));
 }
 
 fn read(sd: &SdCard) -> Read {

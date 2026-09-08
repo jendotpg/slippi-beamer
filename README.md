@@ -7,7 +7,11 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 1. implement gzip compression :)
    1. update wifi link limits
 
-2. hardware research: whats the right ap to use? is the pi gonna actually do better under the same network conditions?
+2. redesign screen:
+   1. always show station name (unless error or booting)
+   2. icon in the top-right for when there's an error state
+   3. icon in the bottom-right for when there's a busy state
+
 3. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
