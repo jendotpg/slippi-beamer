@@ -9,8 +9,6 @@ pub enum ErrorLabel {
     BadConfig,
     NoUsb,
     NoWifi,
-    WrongWifi,
-    NoIp,
     NoHttp,
     NoMdns,
     Crashed,
@@ -34,8 +32,6 @@ impl ErrorLabel {
             ErrorLabel::BadConfig => "BAD CONFIG",
             ErrorLabel::NoUsb => "NO USB",
             ErrorLabel::NoWifi => "NO WIFI",
-            ErrorLabel::WrongWifi => "WRONG WIFI",
-            ErrorLabel::NoIp => "NO IP",
             ErrorLabel::NoHttp => "NO HTTP",
             ErrorLabel::NoMdns => "NO MDNS",
             ErrorLabel::Crashed => "CRASHED",
@@ -57,12 +53,16 @@ pub enum WarningLabel {
     SlpMisformat,
     DriveFilling,
     WeakLink,
+    WifiNotAssociated,
+    WifiNoDHCPLease,
 }
 
-pub const WARNINGS: [WarningLabel; 6] = [
+pub const WARNINGS: [WarningLabel; 8] = [
     WarningLabel::DriveFailing,
     WarningLabel::DriveFull,
     WarningLabel::NoHost,
+    WarningLabel::WifiNotAssociated,
+    WarningLabel::WifiNoDHCPLease,
     WarningLabel::WeakLink,
     WarningLabel::SlpMisformat,
     WarningLabel::DriveFilling,
@@ -77,6 +77,8 @@ impl WarningLabel {
             WarningLabel::SlpMisformat => "SLP MISFORMAT",
             WarningLabel::DriveFilling => "DRIVE FILLING",
             WarningLabel::WeakLink => "WEAK LINK",
+            WarningLabel::WifiNotAssociated => "WIFI ISSUE",
+            WarningLabel::WifiNoDHCPLease => "WIFI TOO FULL",
         }
     }
 
@@ -88,6 +90,8 @@ impl WarningLabel {
             WarningLabel::SlpMisformat => "a replay is formatted incorrectly",
             WarningLabel::DriveFilling => "delete replays from the card soon",
             WarningLabel::WeakLink => "the wifi connection is poor",
+            WarningLabel::WifiNotAssociated => "cannot reach the wifi network",
+            WarningLabel::WifiNoDHCPLease => "the network gave out no address",
         }
     }
 

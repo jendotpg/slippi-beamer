@@ -4,16 +4,18 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. when losing wifi live, throw an error! it just silently stops working btu stays green :(
-2. when `config.txt`is too big, throw an error! just silently fails
-3. read-ahead cache? this is probably the best way to get faster downloads...
-   1. idk if theres enough memory tbh....
+1. implement gzip compression :)
+   1. update wifi link limits
 
-4. when "busy" but theres a warning - blink amber instead of solid amber!!
-5. support other boards with different pinouts? different build options, maybe?
+2. flip color meanings - amber means warning, blinking means busy!
+   1. make boot green blink, too
+   2. states change: Idle -> HealthyIdle, Busy -> HealthyBusy, split warning into WarningIdle and WarningBusy.
+
+3. when `config.txt`is too big, throw an error! just silently fails
+4. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-6. colorblind mode? blue instead of amber?
+5. colorblind mode? blue instead of amber?
 
 ## Configuring a station
 
@@ -207,23 +209,23 @@ Hold the button on the side of the board while plugging it in to enter download 
 | `NO CONFIG`     | `CONFIG/config.txt` could not be read.                                                                    |
 | `BAD CONFIG`    | The file was read and rejected. The detail line names the bad key.                                        |
 | `NO USB`        | The USB stack would not start. The station halts. (A host that simply never reads is`NO WII`, a warning.) |
-| `NO WIFI`       | Did not associate with the configured SSID.                                                               |
-| `WRONG WIFI`    | Associated, but with a different network than`config.txt` asks for.                                       |
-| `NO IP`         | Associated, but the network handed out no address.                                                        |
+| `NO WIFI`       | The ESP32 radio refused to start - this is a hardware issue                                               |
 | `NO HTTP`       | Nothing answered on port 80. It is collecting replays it cannot serve.                                    |
 | `NO MDNS`       | It will not appear in a discovery browse. Replays are unaffected.                                         |
 | `CRASHED`       | The firmware panicked. The faulting task is parked; the station is still recording.                       |
 
 ### Warning labels
 
-| Label           | What is off                                                                                                                |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.                               |
-| `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served. Delete some.                                          |
-| `NO WII`        | Nothing has read this drive in ten seconds — a charger, a dead port, or a console that never mounted it.                   |
-| `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.                        |
-| `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.                                      |
-| `WEAK LINK`     | The wifi is too weak to move replays. The station still tries to operate as normal - but downloads will probably time out. |
+| Label           | What is off                                                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.                                      |
+| `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served. Delete some.                                                 |
+| `NO WII`        | Nothing has read this drive in ten seconds — a charger, a dead port, or a console that never mounted it.                          |
+| `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.                               |
+| `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.                                             |
+| `WEAK LINK`     | The wifi is likely too weak to move replays. The station still tries to operate as normal - but downloads will probably time out. |
+| `WIFI ISSUE`    | The wifi failed to associate                                                                                                      |
+| `WIFI TOO FULL` | The wifi associatedbut didn't issue an IP address - usually this means there are too many devices connected to the router         |
 
 ### A warning about FAT cache
 

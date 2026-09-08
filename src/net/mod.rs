@@ -205,20 +205,7 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         }
     };
 
-    let mut mdns = match mdns::advertise(&plan.hostname) {
-        Ok(m) => Some(m),
-        Err(e) => {
-            fail(
-                crate::status::ErrorLabel::NoMdns,
-                &[
-                    "this station will not appear in a discovery browse",
-                    &format!("{e}"),
-                    "the Wii keeps recording replays to the card",
-                ],
-            );
-            None
-        }
-    };
+    let mut mdns = None;
 
     check::set(check::Identity {
         station: plan.station.clone(),
@@ -226,14 +213,7 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         ssid: Some(join.ssid.clone()),
     });
 
-    if server.is_some() && mdns.is_some() {
-        set_result(NetResult::Ok);
-        log::info!(
-            "net up: http://{}.local/ -- {}",
-            plan.hostname,
-            crate::journal::heap_note(),
-        );
-    } else {
+    if server.is_none() {
         set_result(NetResult::Fail);
     }
 
@@ -263,20 +243,9 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
             }
 
             if mdns.is_none() {
-                mdns = match mdns::advertise(&hostname) {
-                    Ok(m) => Some(m),
-                    Err(e) => {
-                        fail(
-                            crate::status::ErrorLabel::NoMdns,
-                            &[
-                                "this station will not appear in a discovery browse",
-                                &format!("{e}"),
-                                "the Wii keeps recording replays to the card",
-                            ],
-                        );
-                        break false;
-                    }
-                };
+                mdns = mdns::advertise(&hostname)
+                    .map_err(|e| log::warn!("mdns did not advertise, retrying: {e}"))
+                    .ok();
             }
 
             check::set(check::Identity {
@@ -290,10 +259,27 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
             continue;
         }
 
+        if mdns.is_none() && server.is_some() && radio.associated() {
+            mdns = match mdns::advertise(&hostname) {
+                Ok(m) => {
+                    set_result(NetResult::Ok);
+                    log::info!(
+                        "net up: http://{hostname}.local/ -- {}",
+                        crate::journal::heap_note(),
+                    );
+                    Some(m)
+                }
+                Err(e) => {
+                    log::warn!("mdns did not advertise, retrying: {e}");
+                    None
+                }
+            };
+        }
+
         std::thread::sleep(RED_POLL);
 
         since_tick += RED_POLL;
-        if since_tick >= ASSOCIATION_TICK {
+        if since_tick >= wifi::tick_interval() {
             since_tick = Duration::ZERO;
             radio.tick();
         }
@@ -303,8 +289,6 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
 }
 
 const RED_POLL: Duration = Duration::from_millis(250);
-
-const ASSOCIATION_TICK: Duration = Duration::from_secs(10);
 
 fn stand_down(
     server: Option<esp_idf_svc::http::server::EspHttpServer<'static>>,

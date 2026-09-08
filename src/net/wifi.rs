@@ -1,6 +1,7 @@
 use std::ffi::CString;
 use std::net::Ipv4Addr;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::modem::Modem;
@@ -27,9 +28,14 @@ pub struct Join {
 
 const DHCP_TIMEOUT: Duration = Duration::from_secs(30);
 
+const BACKOFF_MIN: Duration = Duration::from_secs(3);
+const BACKOFF_MAX: Duration = Duration::from_secs(30);
+
 pub struct Radio {
     wifi: BlockingWifi<EspWifi<'static>>,
     ssid: String,
+    backoff: Duration,
+    next_attempt: Instant,
 }
 
 impl Radio {
@@ -56,9 +62,16 @@ impl Radio {
         let mut radio = Radio {
             wifi,
             ssid: String::new(),
+            backoff: BACKOFF_MIN,
+            next_attempt: Instant::now(),
         };
-        radio.associate(hostname, join)?;
+
+        let _ = radio.associate(hostname, join);
         Ok(radio)
+    }
+
+    pub fn associated(&self) -> bool {
+        self.wifi.is_connected().unwrap_or(false) && self.wifi.is_up().unwrap_or(false)
     }
 
     pub fn rejoin(&mut self, hostname: &str, join: &Join) -> Result<(), ()> {
@@ -72,7 +85,26 @@ impl Radio {
             log::warn!("stop before re-join: {e}");
         }
 
-        self.associate(hostname, join)
+        self.reset_backoff();
+        let _ = self.associate(hostname, join);
+        Ok(())
+    }
+
+    fn reset_backoff(&mut self) {
+        self.backoff = BACKOFF_MIN;
+        self.next_attempt = Instant::now();
+    }
+
+    fn defer_retry(&mut self) {
+        warnings::set(WarningLabel::WifiNotAssociated, true);
+
+        self.next_attempt = Instant::now() + self.backoff;
+        log::warn!(
+            "not associated with {:?}; next attempt in {}s",
+            self.ssid,
+            self.backoff.as_secs()
+        );
+        self.backoff = (self.backoff * 2).min(BACKOFF_MAX);
     }
 
     fn associate(&mut self, hostname: &str, join: &Join) -> Result<(), ()> {
@@ -111,7 +143,6 @@ impl Radio {
         })?;
 
         set_country(&join.country);
-
         no_power_save();
 
         log::info!(
@@ -119,54 +150,40 @@ impl Radio {
             join.ssid,
             if join.hidden { "hidden" } else { "broadcast" }
         );
-        self.wifi.connect().map_err(|e| {
-            fail(
-                ErrorLabel::NoWifi,
-                &[
-                    "did not associate with the configured SSID",
-                    &format!("SSID {:?}: {e}", join.ssid),
-                    "check SSID and PASSWORD in CONFIG/config.txt, and that the AP is 2.4 GHz",
-                ],
-            )
-        })?;
+        if let Err(e) = self.wifi.connect() {
+            log::warn!("could not associate with {:?}: {e}", join.ssid);
+            self.defer_retry();
+            return Err(());
+        }
 
         if let Some(actual) = associated_ssid() {
             if actual != join.ssid {
-                fail(
-                    ErrorLabel::WrongWifi,
-                    &[
-                        "associated with a different network than config.txt asks for",
-                        &format!("asked for {:?}, joined {actual:?}", join.ssid),
-                    ],
-                );
-                return Err(());
+                log::warn!("asked for SSID {:?}, joined {actual:?}", join.ssid);
             }
         }
 
         let wifi = &self.wifi;
-        wifi.ip_wait_while(|| wifi.is_up().map(|up| !up), Some(DHCP_TIMEOUT))
-            .map_err(|e| {
-                fail(
-                    ErrorLabel::NoIp,
-                    &[
-                        "associated, but the network handed out no address",
-                        &format!("no DHCP lease after {}s: {e}", DHCP_TIMEOUT.as_secs()),
-                    ],
-                )
-            })?;
+        if let Err(e) = wifi.ip_wait_while(|| wifi.is_up().map(|up| !up), Some(DHCP_TIMEOUT)) {
+            log::warn!("no DHCP lease after {}s: {e}", DHCP_TIMEOUT.as_secs());
+            warnings::set(WarningLabel::WifiNoDHCPLease, true);
+            self.defer_retry();
+            return Err(());
+        }
 
-        let ip = current_ip(&self.wifi).ok_or_else(|| {
-            fail(
-                ErrorLabel::NoIp,
-                &["associated, but the interface reports no address"],
-            )
-        })?;
+        let Some(ip) = current_ip(&self.wifi) else {
+            log::warn!("associated, but the interface reports no address");
+            warnings::set(WarningLabel::WifiNoDHCPLease, true);
+            self.defer_retry();
+            return Err(());
+        };
 
         log::info!(
             "associated with {:?}, address {ip}, hostname {hostname}",
             join.ssid
         );
         status::set_net(Net::Up(ip));
+        self.reset_backoff();
+        clear_wifi_warnings();
         Ok(())
     }
 
@@ -177,7 +194,16 @@ impl Radio {
             sample_link();
             if let Some(ip) = current_ip(&self.wifi) {
                 status::set_net(Net::Up(ip));
+                self.reset_backoff();
+                clear_wifi_warnings();
             }
+            return;
+        }
+
+        status::set_net(Net::Offline);
+        TICK_FAST.store(true, Ordering::Relaxed);
+
+        if Instant::now() < self.next_attempt {
             return;
         }
 
@@ -185,23 +211,17 @@ impl Radio {
             "lost {:?} (connected {connected}, up {up}); reconnecting",
             self.ssid
         );
-        status::set_net(Net::Offline);
-        if let Err(e) = self.wifi.connect() {
+
+        if let Err(e) = self.wifi.wifi_mut().connect() {
             log::warn!("reconnect failed: {e}");
-            return;
         }
-        if let Err(e) = self
-            .wifi
-            .ip_wait_while(|| self.wifi.is_up().map(|up| !up), Some(DHCP_TIMEOUT))
-        {
-            log::warn!("reconnected, but no address: {e}");
-            return;
-        }
-        if let Some(ip) = current_ip(&self.wifi) {
-            log::info!("back on {:?}, address {ip}", self.ssid);
-            status::set_net(Net::Up(ip));
-        }
+        self.defer_retry();
     }
+}
+
+fn clear_wifi_warnings() {
+    warnings::set(WarningLabel::WifiNotAssociated, false);
+    warnings::set(WarningLabel::WifiNoDHCPLease, false);
 }
 
 fn current_ip(wifi: &BlockingWifi<EspWifi<'static>>) -> Option<Ipv4Addr> {
@@ -250,6 +270,7 @@ fn sample_link() {
     let rssi = if unsafe { esp_wifi_sta_get_rssi(&mut rssi) } == ESP_OK {
         rssi
     } else {
+        update_weak_link(None);
         return;
     };
 
@@ -268,18 +289,35 @@ fn sample_link() {
     };
 
     *LINK.lock().unwrap_or_else(|e| e.into_inner()) = Some(Link { rssi, phy, channel });
-    update_weak_link(rssi);
+
+    TICK_FAST.store(rssi < WEAK_ON, Ordering::Relaxed);
+    update_weak_link(Some(rssi));
 }
+
+static TICK_FAST: AtomicBool = AtomicBool::new(false);
+pub fn tick_interval() -> Duration {
+    if TICK_FAST.load(Ordering::Relaxed) {
+        FAST_TICK
+    } else {
+        ASSOCIATION_TICK
+    }
+}
+
+pub const ASSOCIATION_TICK: Duration = Duration::from_secs(10);
+pub const FAST_TICK: Duration = Duration::from_secs(3);
 
 const WEAK_ON: i32 = -70;
 const WEAK_OFF: i32 = -65;
 const WEAK_RUN: u32 = 3;
 
-fn update_weak_link(rssi: i32) {
-    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-
+fn update_weak_link(rssi: Option<i32>) {
     static WEAK: AtomicBool = AtomicBool::new(false);
     static RUN: AtomicU32 = AtomicU32::new(0);
+
+    let Some(rssi) = rssi else {
+        RUN.store(0, Ordering::Relaxed);
+        return;
+    };
 
     let weak = WEAK.load(Ordering::Relaxed);
     let crossed = if weak {
