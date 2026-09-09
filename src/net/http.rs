@@ -104,6 +104,7 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
         stack_size: 8192, // determined experimentally - lower panics...
         uri_match_wildcard: true,
         max_open_sockets: 2,
+        lru_purge_enable: false,
         ..Default::default()
     })?;
 
@@ -142,8 +143,9 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
             let low = crate::journal::heap_low();
             let oom = unsafe { esp_idf_svc::sys::beamer_oom_count() };
             let oom_largest = unsafe { esp_idf_svc::sys::beamer_oom_largest() };
+            let (conn, floor) = (super::CONN_HEAP, super::HEAP_FLOOR);
             let body = format!(
-                r#"{{"free": {free}, "largest_block": {largest}, "low_water": {low}, "oom_count": {oom}, "oom_largest": {oom_largest}}}"#
+                r#"{{"free": {free}, "largest_block": {largest}, "low_water": {low}, "oom_count": {oom}, "oom_largest": {oom_largest}, "conn_heap": {conn}, "heap_floor": {floor}}}"#
             );
             respond_json(req, 200, body.as_bytes())
         })?;

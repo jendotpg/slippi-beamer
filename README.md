@@ -302,12 +302,12 @@ Everything else — serving replays over HTTP, counting files, peeking at the ga
 
 #### Allocated by lwIP
 
-| Consumer                                     |      Bytes |                                                                                                       |
-| -------------------------------------------- | ---------: | ----------------------------------------------------------------------------------------------------- |
-| One queued TCP segment                       |      1,536 | a`pbuf` of 16+56+1440 and a `tcp_seg` of 16, each +4 for TLSF                                         |
-| One connection's send queue,`SND_BUF` 11,520 |     12,288 | 8 segments;`LWIP_NETIF_TX_SINGLE_PBUF` rounds every one up to a full MSS whatever it actually carries |
-| **Both sockets,`max_open_sockets` = 2**      | **24,576** | what serving actually costs, since replay bytes fill every segment                                    |
-| `TCP_SND_QUEUELEN` ceiling                   |     49,152 | 16 short segments x 2 sockets.                                                                        |
+| Consumer                                     |      Bytes |                                                                                                                                  |
+| -------------------------------------------- | ---------: | -------------------------------------------------------------------------------------------------------------------------------- |
+| One queued TCP segment                       |      1,536 | a`pbuf` of 16+56+1440 and a `tcp_seg` of 16, each +4 for TLSF                                                                    |
+| One connection's send queue,`SND_BUF` 11,520 |     12,288 | 8 segments;`LWIP_NETIF_TX_SINGLE_PBUF` rounds every one up to a full MSS                                                        |
+| **Both sockets,`max_open_sockets` = 2**      | **24,576** | what serving actually costs, since replay bytes fill every segment                                                               |
+| Four stalled readers                         |     49,152 | a closed socket keeps its queue until `MAXRTX` - note this OOM! we will refuse to offer even the third reader for this reason... |
 
 #### Summary
 
@@ -318,7 +318,7 @@ Everything else — serving replays over HTTP, counting files, peeking at the ga
 | Allocated once at boot               |  ~135 KB |
 | Allocated by lwIP while serving      | 12-24 KB |
 | Free heap at rest                    |   ~51 KB |
-| Free heap while serving              | 27-39 KB |
+| Free heap while serving              | 22-34 KB |
 | Largest free block at rest           | ~31.0 KB |
 | Largest free block during a download |  ~9.0 KB |
 
@@ -337,8 +337,10 @@ This creates a draft, not a new release - go manually publish the draft in Githu
 #### Basics
 
 `std` Rust on ESP-IDF, via `esp-idf-hal` / `esp-idf-svc` / `esp-idf-sys`. ESP-IDF provides a newlib environment, so this is real `std` — ordinary error handling, `serde_json` for the report writers — plus direct access to the C components underneath: TinyUSB for Mass Storage, FatFs for the volume, `esp_http_server`, `esp_wifi`, `mdns`, `esp_lcd`.
+There are two FFI components:
 
-The TinyUSB callbacks need a small `unsafe` FFI shim — USB descriptors and the `tud_msc_*` entry points, in `components/beamer_msc`. That is the only raw FFI in the project and it should stay that way.
+1. `components/beamer_msc` wraps TinyUSB (and implements the write-back cache)
+2. `components/beamer_gz` wraps zlib
 
 #### Storage odds and ends
 

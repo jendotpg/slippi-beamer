@@ -13,6 +13,9 @@ use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::modem::Modem;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
+use esp_idf_svc::sys::{
+    CONFIG_LWIP_MAX_ACTIVE_TCP, CONFIG_LWIP_TCP_MSS, CONFIG_LWIP_TCP_SND_BUF_DEFAULT,
+};
 
 use crate::config::Outcome;
 use crate::storage::SdCard;
@@ -69,9 +72,9 @@ pub fn transfers_in_flight() -> u32 {
 pub fn transfers_started() -> u32 {
     TRANSFERS.load(Ordering::Relaxed)
 }
-
-pub const CONN_HEAP: u32 = 8 * 1_536;
-pub const HEAP_FLOOR: u32 = CONN_HEAP + 8 * 1024;
+const SEGMENT: u32 = (16 + 56 + CONFIG_LWIP_TCP_MSS + 4) + (16 + 4);
+pub const CONN_HEAP: u32 = (CONFIG_LWIP_TCP_SND_BUF_DEFAULT / CONFIG_LWIP_TCP_MSS) * SEGMENT;
+pub const HEAP_FLOOR: u32 = CONFIG_LWIP_MAX_ACTIVE_TCP * CONN_HEAP + 8 * 1024;
 
 pub fn heap_too_low() -> Option<u32> {
     let (free, _) = crate::journal::heap_now();
