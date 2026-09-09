@@ -22,10 +22,13 @@ heapless = { version = "0.9", default-features = false }
 [build-dependencies]
 embuild = { version = "0.33", features = ["espidf"] }
 
-# USB descriptors and the tinyusb mass storage callbacks - the only FFI
 [[package.metadata.esp-idf-sys.extra_components]]
 component_dirs = ["components/beamer_msc"]
 bindings_header = "components/beamer_msc/include/beamer_msc.h"
+
+[[package.metadata.esp-idf-sys.extra_components]]
+component_dirs = ["components/beamer_gz"]
+bindings_header = "components/beamer_gz/include/beamer_gz.h"
 
 [profile.release]
 opt-level = "s"

@@ -1,4 +1,5 @@
 pub mod check;
+pub mod gz;
 pub mod http;
 pub mod mdns;
 pub mod wifi;
@@ -67,6 +68,18 @@ pub fn transfers_in_flight() -> u32 {
 
 pub fn transfers_started() -> u32 {
     TRANSFERS.load(Ordering::Relaxed)
+}
+
+pub const CONN_HEAP: u32 = 8 * 1_536;
+pub const HEAP_FLOOR: u32 = CONN_HEAP + 8 * 1024;
+
+pub fn heap_too_low() -> Option<u32> {
+    let (free, _) = crate::journal::heap_now();
+    (free < HEAP_FLOOR).then_some(free)
+}
+
+pub fn oom_count() -> u32 {
+    unsafe { esp_idf_svc::sys::beamer_oom_count() }
 }
 
 pub struct Transfer;
@@ -282,6 +295,24 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         if since_tick >= wifi::tick_interval() {
             since_tick = Duration::ZERO;
             radio.tick();
+
+            crate::warnings::set(
+                crate::status::WarningLabel::LowMemory,
+                heap_too_low().is_some(),
+            );
+
+            let failed = oom_count();
+            if failed > 0 {
+                fail(
+                    crate::status::ErrorLabel::OutOfMemory,
+                    &[
+                        "the heap ran out and packets were dropped",
+                        &format!("{failed} allocation(s) failed"),
+                        "the station stops answering when this happens",
+                    ],
+                );
+                break false;
+            }
         }
     };
 

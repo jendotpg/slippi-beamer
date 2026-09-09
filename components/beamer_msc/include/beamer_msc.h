@@ -145,6 +145,10 @@ extern "C"
     uint32_t beamer_boot_count(void);
     size_t beamer_backtrace(char *out, size_t len);
 
+    void beamer_oom_watch(void);
+    uint32_t beamer_oom_count(void);
+    uint32_t beamer_oom_largest(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -4,18 +4,17 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. implement gzip compression :)
-   1. update wifi link limits
-
+1. update wifi link limits for gzip
 2. redesign screen:
    1. always show station name (unless error or booting)
    2. icon in the top-right for when there's an error state
    3. icon in the bottom-right for when there's a busy state
 
-3. support other boards with different pinouts? different build options, maybe?
+3. remove debug/zeros (its a nightmare and we already know what we wanted from it)
+4. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-4. colorblind mode? blue instead of amber?
+5. colorblind mode? blue instead of amber?
 
 ## Configuring a station
 
@@ -71,9 +70,9 @@ The screen shows only the first error of the boot, with`+N more` beneath it when
 | Item                        | Detail                                                                                                                                                                                                                                             | Where I Source Them                                                                                                                    |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | LilyGO T-Dongle-S3 with LCD | ESP32-S3 with 16 MB flash. Native 4-bit SDMMC, native USB OTG on a USB-A male plug, an addressable RGB status LED, a 0.96" 160×80 colour screen, and a transparent case. Get the variant with the screen if you can afford the extra dollar or so! | [www.amazon.com/dp/B0BK9162QY](https://www.amazon.com/dp/B0BK9162QY?lv=shuf&channelId=500&plpRedirect=mhFallback&th=1)                 |
-| microSD card                | Any size from 4 GB up, but format the replay partition to 4 GB with 4 KB clusters — see [Card size](#card-size).                                                                                                                                   | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793) |
+| microSD card                | Any size from 4 GB up, but format the replay partition to 4 GB with 4 KB clusters — see[Card size](#card-size).                                                                                                                                    | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793) |
 
-Depending on venue and size of fleet, you may need to buy a separate router as well - not all WiFi networks can handle an extra 20 devices and very few can handle an extra 80! I use [The GL.Inet Flint 2](https://www.gl-inet.com/en-us/products/gl-mt6000) (~$170 at time of writing). One thing to note: **ESP32-S3 is 2.4 GHz only.** Maybe sometime soon we'll see a company selling the ESP32-S31 in the dongle form factor and move over - 5 GHz and WiFi 6 would lowkey be a godsend...
+Depending on venue and size of fleet, you may need to buy a separate router as well - not all WiFi networks can handle an extra 20 devices and very few can handle an extra 80! I use [the GL.iNet Opal](https://www.gl-inet.com/en-us/products/gl-sft1200) (~$40 at time of writing), one per station area, each on its own channel. One thing to note: **ESP32-S3 is 2.4 GHz only** (there actually isn't an ESP32 with both 5 GHz and USB OTG). A girl can dream...
 
 ## Testing without a station
 
@@ -153,6 +152,15 @@ A few notes:
 - `replay_count` stops at `replay_cap` (`REPLAY-CAP`, default 512) for performance reasons - directory walks are expensive!
 - Only `*.slp` are listed or served and filenames can't have spaces or unexpected special characters - this is meant for reading off of a Wii!
 
+### `GET /SLIPPI/<file>`
+
+A few notes:
+
+- Accepts `Accept-Encoding: gzip` (body comes back `Content-Encoding: gzip` with no `Content-Length`)
+- When `Range` is present, replay can't be gzipped. Answers 206
+- **`X-Replay-From: <n>` is the gzipped resume path.** `n` counts uncompressed bytes. Answers `200` with `X-Replay-From` in the return header.
+- An `X-Replay-From` offset past the end of the file gets `416`
+
 ### Odds and ends
 
 `GET /` returns `403`. There is no page at the root and no directory listing anywhere; that is the endpoint working, not a broken station.
@@ -211,6 +219,7 @@ Hold the button on the side of the board while plugging it in to enter download 
 | `NO WIFI`       | The ESP32 radio refused to start - this is a hardware issue                                               |
 | `NO HTTP`       | Nothing answered on port 80. It is collecting replays it cannot serve.                                    |
 | `NO MDNS`       | It will not appear in a discovery browse. Replays are unaffected.                                         |
+| `OUT OF MEMORY` | OOM - httpd shuts down. Replays are unaffected.                                                           |
 | `CRASHED`       | The firmware panicked. The faulting task is parked; the station is still recording.                       |
 
 ### Warning labels
@@ -225,6 +234,7 @@ Hold the button on the side of the board while plugging it in to enter download 
 | `WEAK LINK`     | The wifi is likely too weak to move replays. The station still tries to operate as normal - but downloads will probably time out. |
 | `WIFI ISSUE`    | The wifi failed to associate                                                                                                      |
 | `WIFI TOO FULL` | The wifi associatedbut didn't issue an IP address - usually this means there are too many devices connected to the router         |
+| `LOW MEMORY`    | Not enough heap to take another connection. Replays are refused with`503` until there's space.                                    |
 
 ### A warning about FAT cache
 
@@ -256,11 +266,12 @@ Everything else — serving replays over HTTP, counting files, peeking at the ga
 | Consumer                     |       Bytes |                                                                                                                                                                |
 | ---------------------------- | ----------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `beamer_wbc.c` `s_data`      |      32,768 | the write-back cache:`WBC_SECTORS` = 64 sectors of 512 B                                                                                                       |
+| `beamer_gz.c` `s_arena`      |      15,360 | zlip allocations over a 1 KB window (larger windows get marginal compression benefits)                                                                         |
 | `beamer_wbc.c` `s_staging`   |       8,192 | one flush run, DMA'd straight out of`.bss`                                                                                                                     |
 | `beamer_msc.c` `s_ring`      |       8,192 | 512 transfer timings, the CBW→CSW census                                                                                                                       |
 | `beamer_log.c` `s_ring`      |       8,192 | the`esp_log` capture that becomes `LOGS/debug_N.txt`, 4,096 B of it kept per boot with the oldest lines dropped. Static - `DEBUG=false` does not give it back. |
 | `lcd.rs` `SCRATCH`           |       7,680 | one 160×24 band of the panel, so rendering never allocates                                                                                                     |
-| `http.rs` `SEND_BUF`         |       8,192 | the replay read chunk — see below                                                                                                                              |
+| `http.rs` `SCRATCH`          |       6,144 | a 2 KB read chunk off the card and a 4 KB block of compressed output                                                                                           |
 | `scan.rs` `seen` + `present` |       4,160 | `REPLAY-CAP` name hashes and presence bitmap                                                                                                                   |
 | `http.rs` `BODY_BUF`         |       4,096 | `GET /status` or `GET /SLIPPI/` body                                                                                                                           |
 | `publish.rs` `index_buf`     |       2,560 | replay index json                                                                                                                                              |
@@ -271,7 +282,7 @@ Everything else — serving replays over HTTP, counting files, peeking at the ga
 | TinyUSB`_mscd_epbuf`         |       4,096 | `CFG_TUD_MSC_EP_BUFSIZE`                                                                                                                                       |
 | `beamer_wbc.c` `s_meta`      |         768 | 64 slot descriptors                                                                                                                                            |
 | everything else              |      ~2,000 | descriptors, fonts, the Shift-JIS table, scalars                                                                                                               |
-| **Total**                    | **~105 KB** |                                                                                                                                                                |
+| **Total**                    | **~124 KB** |                                                                                                                                                                |
 
 #### Allocated once at boot
 
@@ -289,16 +300,27 @@ Everything else — serving replays over HTTP, counting files, peeking at the ga
 | Journal drain task (only when`DEBUG=true`)                                                                                                                                          |        8,192 |
 | **Total**                                                                                                                                                                           | **~135,000** |
 
+#### Allocated by lwIP
+
+| Consumer                                     |      Bytes |                                                                                                       |
+| -------------------------------------------- | ---------: | ----------------------------------------------------------------------------------------------------- |
+| One queued TCP segment                       |      1,536 | a`pbuf` of 16+56+1440 and a `tcp_seg` of 16, each +4 for TLSF                                         |
+| One connection's send queue,`SND_BUF` 11,520 |     12,288 | 8 segments;`LWIP_NETIF_TX_SINGLE_PBUF` rounds every one up to a full MSS whatever it actually carries |
+| **Both sockets,`max_open_sockets` = 2**      | **24,576** | what serving actually costs, since replay bytes fill every segment                                    |
+| `TCP_SND_QUEUELEN` ceiling                   |     49,152 | 16 short segments x 2 sockets.                                                                        |
+
 #### Summary
 
 |                                      |    Bytes |
 | ------------------------------------ | -------: |
 | Available                            |   320 KB |
-| Allocated statically at link time    |  ~105 KB |
+| Allocated statically at link time    |  ~124 KB |
 | Allocated once at boot               |  ~135 KB |
-| Free heap at rest                    |   ~64 KB |
-| Largest free block at rest           | ~31.7 KB |
-| Largest free block during a download |  ~1.2 KB |
+| Allocated by lwIP while serving      | 12-24 KB |
+| Free heap at rest                    |   ~51 KB |
+| Free heap while serving              | 27-39 KB |
+| Largest free block at rest           | ~31.0 KB |
+| Largest free block during a download |  ~9.0 KB |
 
 ### Releasing
 

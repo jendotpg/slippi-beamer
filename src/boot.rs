@@ -22,6 +22,7 @@ pub fn run() -> anyhow::Result<()> {
 
     journal::spawn_log()?;
     crate::panic::install();
+    unsafe { esp_idf_svc::sys::beamer_oom_watch() };
 
     log::info!(
         "boot {}: reset {}, {}",

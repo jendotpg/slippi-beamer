@@ -35,12 +35,16 @@ import sys
 import threading
 import time
 import uuid
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SCHEMA = 1
 DEFAULT_SERVED = 10
 DEFAULT_CAP = 512
 CHUNK = 8 * 1024
+GZ_WINDOW_BITS = 10
+GZ_MEM_LEVEL = 3
+GZ_LEVEL = 6
 
 
 # A port of beamer::slp (src/slp.rs)
@@ -604,6 +608,44 @@ class Handler(BaseHTTPRequestHandler):
             return "bad"
         return n if 0 <= n < total else "bad"
 
+    def parse_from(self, total):
+        """`X-Replay-From: N`, the resume the firmware can still compress.
+        Returns an offset, None when absent, or "bad"."""
+        raw = self.headers.get("X-Replay-From")
+        if raw is None:
+            return None
+        try:
+            n = int(raw.strip())
+        except ValueError:
+            return "bad"
+        return n if 0 <= n < total else "bad"
+
+    def gzip_wanted(self):
+        raw = self.headers.get("Accept-Encoding")
+        if not raw:
+            return False
+        for part in raw.split(","):
+            fields = [f.strip() for f in part.split(";")]
+            if fields[0].lower() != "gzip":
+                continue
+            for f in fields[1:]:
+                k, _, v = f.partition("=")
+                if k.lower() == "q":
+                    try:
+                        if float(v) <= 0:
+                            return False
+                    except ValueError:
+                        pass
+            return True
+        return False
+
+    def gzip_level(self):
+        try:
+            n = int(self.headers.get("X-Beamer-Gz-Level", GZ_LEVEL))
+        except ValueError:
+            return GZ_LEVEL
+        return max(1, min(9, n))
+
     def serve_replay(self, name):
         if not SAFE_NAME.match(name) or not self.station.args.replays:
             self.send_error_json(404, "no such replay")
@@ -621,7 +663,8 @@ class Handler(BaseHTTPRequestHandler):
 
         total = len(body)
         start = self.parse_range(total)
-        if start == "bad":
+        resume = None if start is not None else self.parse_from(total)
+        if start == "bad" or resume == "bad":
             self.send_response(416)
             self.send_header("Content-Range", f"bytes */{total}")
             self.send_header("Accept-Ranges", "bytes")
@@ -630,25 +673,38 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         ranged = start is not None
+        resumed = resume is not None
         if not ranged:
-            start = 0
+            start = resume or 0
         body = body[start:]
+
+        level = self.gzip_level()
+        gzip = not ranged and self.gzip_wanted()
+        if gzip:
+            c = zlib.compressobj(level, zlib.DEFLATED, 16 + GZ_WINDOW_BITS, GZ_MEM_LEVEL)
+            body = c.compress(body) + c.flush()
 
         self.station.replay_requests += 1
         n = self.station.replay_requests
         truncate = self.station.args.truncate_every
         stall = self.station.args.stall_every
 
-        chunked = self.station.args.chunked
+        chunked = self.station.args.chunked or gzip
         self.send_response(206 if ranged else 200)
         self.send_header("Content-Type", "application/octet-stream")
         if chunked:
             self.send_header("Transfer-Encoding", "chunked")
         else:
             self.send_header("Content-Length", str(len(body)))
-        self.send_header("Accept-Ranges", "bytes")
+        if gzip:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding, X-Replay-From")
+        else:
+            self.send_header("Accept-Ranges", "bytes")
         if ranged:
             self.send_header("Content-Range", f"bytes {start}-{total - 1}/{total}")
+        if resumed:
+            self.send_header("X-Replay-From", str(start))
         self.end_headers()
 
         if stall and n % stall == 0:

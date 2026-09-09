@@ -11,6 +11,7 @@ pub enum ErrorLabel {
     NoWifi,
     NoHttp,
     NoMdns,
+    OutOfMemory,
     Crashed,
 }
 
@@ -34,6 +35,7 @@ impl ErrorLabel {
             ErrorLabel::NoWifi => "NO WIFI",
             ErrorLabel::NoHttp => "NO HTTP",
             ErrorLabel::NoMdns => "NO MDNS",
+            ErrorLabel::OutOfMemory => "OUT OF MEMORY",
             ErrorLabel::Crashed => "CRASHED",
         }
     }
@@ -55,10 +57,12 @@ pub enum WarningLabel {
     WeakLink,
     WifiNotAssociated,
     WifiNoDHCPLease,
+    LowMemory,
 }
 
-pub const WARNINGS: [WarningLabel; 8] = [
+pub const WARNINGS: [WarningLabel; 9] = [
     WarningLabel::DriveFailing,
+    WarningLabel::LowMemory,
     WarningLabel::DriveFull,
     WarningLabel::NoHost,
     WarningLabel::WifiNotAssociated,
@@ -79,6 +83,7 @@ impl WarningLabel {
             WarningLabel::WeakLink => "WEAK LINK",
             WarningLabel::WifiNotAssociated => "WIFI ISSUE",
             WarningLabel::WifiNoDHCPLease => "WIFI TOO FULL",
+            WarningLabel::LowMemory => "LOW MEMORY",
         }
     }
 
@@ -92,6 +97,7 @@ impl WarningLabel {
             WarningLabel::WeakLink => "the wifi connection is poor",
             WarningLabel::WifiNotAssociated => "cannot reach the wifi network",
             WarningLabel::WifiNoDHCPLease => "the network gave out no address",
+            WarningLabel::LowMemory => "not enough heap left to serve safely",
         }
     }
 
