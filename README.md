@@ -11,17 +11,14 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 2. make "DRIVE FAILING", "WIFI ISSUE", "WIFI TOO FULL" errors instead of a warning
    1. a warning is either fixable OTA or usually ignorable. these three require physical intervention - they should be errors!
 
-3. redesign screen:
+3. fix "NO WII" not working right
+4. redesign screen:
    1. always show station name (unless error or booting)
    2. icon in the top-right for when there's an error state
    3. icon in the bottom-right for when there's a busy state
 
-4. remove debug/zeros (its a nightmare and we already know what we wanted from it)
-5. remove all the built-up timing + memory instrumentation. we don't really need it anymore. we can save it as a branch so that its easy to pull back what we want in the future.
-6. support other boards with different pinouts? different build options, maybe?
-   1. order and test Waveshare ESP32-S3-LCD-1.47 version
-
-7. colorblind mode? blue instead of amber?
+5. remove debug/zeros (its a nightmare and we already know what we wanted from it)
+6. get replay-manager-for-slippi fork caught up!
 
 ## Hardware
 
@@ -282,7 +279,7 @@ cargo run --release
 
 **Editing `components/` does not, on its own, force cargo to rebuild the C code. If you edit C code your first rebuild will fail.`build.rs` deals with this this for you - just run the build again and it will work the second time.**
 
-### Status Readout
+### Status readout
 
 **Blinking means something is happening - DO NOT UNPLUG.**
 
