@@ -2,7 +2,7 @@
 """
 fake-beamer - pretend to be a Beamer station, without a Beamer.
 
-Everything replay-manager talks to is an mDNS advertisement and four HTTP
+Everything replay-manager talks to is an mDNS advertisement and five HTTP
 endpoints. None of it needs a Pi, a USB gadget, an LED or a Wii. So this serves
 the endpoints and advertises itself, which is enough to develop and test the
 whole app-side fleet view on one laptop:

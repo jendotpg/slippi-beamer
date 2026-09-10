@@ -4,89 +4,153 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. update wifi link limits for gzip
-2. redesign screen:
+1. remove debug/zeros (its a nightmare and we already know what we wanted from it)
+2. remove all the built-up timing + memory instrumentation. we don't really need it anymore. we can save it as a branch so that its easy to pull back what we want in the future.
+3. update tcp priorities
+   1. always respond to mDNS requests first and foremost
+   2. 503 when busy instead of not responding?
+
+4. make "DRIVE FAILING", "WIFI ISSUE", "WIFI TOO FULL" errors instead of a warning
+   1. a warning is either fixable OTA or usually ignorable. these three require physical intervention - they should be errors!
+
+5. even more memory optimizations:
+   1. lower `CFG_TUD_MSC_EP_BUFSIZE`? this is full-speed, not high-speed...
+   2. make all the "allocated once at boot" firmware and c tasks statically allocated at link time!
+      1. then we can merge the "Allocated by lwIP" and "allocated once at boot" into an "allocated by c libraries" table with a column for "at boot" or "during run-time"
+      2. we can also update the rule - NEVER allocate more than 512 B dynamically in rust code, and make sure all C code can fail gracefully!
+   3. look into lwIP allocations in `.bss` again... it would be so lovely to not worry about those like we do now.....
+
+6. redesign screen:
    1. always show station name (unless error or booting)
    2. icon in the top-right for when there's an error state
    3. icon in the bottom-right for when there's a busy state
 
-3. remove debug/zeros (its a nightmare and we already know what we wanted from it)
-4. support other boards with different pinouts? different build options, maybe?
+7. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-5. colorblind mode? blue instead of amber?
-
-## Configuring a station
-
-`CONFIG/config.txt` on the `BEAMER` drive is the only thing a TO ever edits. The Beamer reads it in full at every boot and again after you edit it. Keys are case-insensitive, blank lines and `#` comments are ignored, and values may be quoted. Config files larger than 4kb are rejected.
-
-| Key                  | Default        | What it does                                                                                                                                                                |
-| -------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SSID`               | blank          | The network to join.**Blank means this station has no network.**                                                                                                            |
-| `PASSWORD`           | blank          | 8–63 characters. Blank means an open network.                                                                                                                               |
-| `COUNTRY`            | `US`           | Two-letter regulatory domain:`US`, `CA`, `JP`, `GB`...                                                                                                                      |
-| `HIDDEN`             | `false`        | Whether the network broadcasts its name.                                                                                                                                    |
-| `STATION-NAME`       | the station ID | What to call this station. Appears as`station_name` in `GET /status`, and as the station's hostname (slugged - see [Station Identity](#station-identity)).                  |
-| `NUM-REPLAYS-SERVED` | `10`           | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                                    |
-| `REPLAY-CAP`         | `512`          | How many replays the station counts on the card before it stops counting. 1 to 512. Past 75% it warns; at the cap it warns and stops serving new replays.                   |
-| `LED-BRIGHTNESS`     | `20`           | The status LED, 0 to 100 percent.                                                                                                                                           |
-| `FLIP-SCREEN`        | `false`        | Whether the screen starts rotated 180 degrees. The button on the side of the dongle flips it either way at any time.                                                        |
-| `DEBUG`              | `false`        | Whether to keep a`LOGS/debug_0001.txt` of each boot, numbered upward from there. Off means the journal records nothing at all. These files are never deleted automatically. |
-
-## Status Readout
-
-A Beamer's screen and LED are live readouts of station health. They are the fastest way — and usually the only way — to tell whether a Beamer is actually working. If the screen is upside down, press the button on the side of the dongle. You can configure this in `config.txt` if you want it to remember after a reboot.
-
-**Blinking means something is happening - DO NOT UNPLUG.**
-
-| Screen                                                         | LED Pattern                       | Meaning                                                        | Safe to Unplug? |
-| -------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------- | --------------- |
-| Loading circle                                                 | Blinking (**green**)              | Booting.                                                       | no              |
-| Station name                                                   | Solid (**green**)                 | Healthy and idle.                                              | yes             |
-| Warning label                                                  | Solid (**amber**)                 | Warning and idle.                                              | yes             |
-| `WRITING` or `SENDING`, with moving dots, over `DO NOT UNPLUG` | Blinking (**green** or **amber**) | Doing something - don't unplug. If amber, there's a warning :P | no              |
-| Error label                                                    | Solid (**red**)                   | Unhealthy.                                                     | yes             |
-| Dark, backlight off                                            | Solid (**red** or **off**)        | Stopped.                                                       | yes             |
-
-**Ejecting a Beamer shuts it down for good.** It flushes the card, leaves the network, drops off the USB bus and sleeps. Unplugging and replugging it is the only way to bring it back.
-
-**An errored Beamer (Red LED, ERROR screen) generally acts like a regular USB drive.** Pull it using the same judgement you would as any other USB drive. It will still record games! (This is of course not true with`NO SD CARD`, `SD UNREADABLE`, `WRONG FORMAT`as there's no way to write the games)
-
-The screen shows only the first error of the boot, with`+N more` beneath it when there are others.
-
-## Setting up a new Beamer
-
-1. Insert a microSD card into the dongle formatted as FAT32 with a first partition of 4GB or smaller.
-   1. The microSD slot is INSIDE the usb jack! Remove the dummy card that comes inside to insert the new one.
-2. Hold the button on the side of the board dongle while you plug it into your laptop, then let go. Then press flash on [the flashing page](https://jendotpg.github.io/slippi-beamer/)
-   1. "Leaving..." means its done - you don't have to wait any longer!
-3. Unplug and replug the dongle to leave download mode. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`. A microSD card that is exFAT, unpartitioned, or partitioned larger than 4GB shows `WRONG FORMAT` on the screen — see [Card size](#card-size).
-4. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
-   1. See [Configuring a station](#configuring-a-station) for more details on this file.
-   2. Watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go! If it goes red and shows an error label, diagnose with the [Error labels](#error-labels) table. Note that the error is from LAST boot - and editing the config while an error shows causes a reboot! I know these semantics are a little confusing... sorry....
+8. colorblind mode? blue instead of amber?
 
 ## Hardware
 
 | Item                        | Detail                                                                                                                                                                                                                                             | Where I Source Them                                                                                                                    |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | LilyGO T-Dongle-S3 with LCD | ESP32-S3 with 16 MB flash. Native 4-bit SDMMC, native USB OTG on a USB-A male plug, an addressable RGB status LED, a 0.96" 160×80 colour screen, and a transparent case. Get the variant with the screen if you can afford the extra dollar or so! | [www.amazon.com/dp/B0BK9162QY](https://www.amazon.com/dp/B0BK9162QY?lv=shuf&channelId=500&plpRedirect=mhFallback&th=1)                 |
-| microSD card                | Any size from 4 GB up, but format the replay partition to 4 GB with 4 KB clusters — see[Card size](#card-size).                                                                                                                                    | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793) |
+| microSD card                | Any size from 4 GB up. Make sure to format the card to 4 GB FAT with 4 KB clusters.                                                                                                                                                                | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793) |
+| Router                      | Only really needed if you have more than ~10 setups - otherwise, you can probably get away with venue wifi.<br /><br />One per section. Try to keep all setups within ~20 feet of the router.                                                      | [Choosing a router](#choosing-a-router)                                                                                                |
 
-Depending on venue and size of fleet, you may need to buy a separate router as well - not all WiFi networks can handle an extra 20 devices and very few can handle an extra 80! I use [the GL.iNet Opal](https://www.gl-inet.com/en-us/products/gl-sft1200) (~$40 at time of writing), one per station area, each on its own channel. One thing to note: **ESP32-S3 is 2.4 GHz only** (there actually isn't an ESP32 with both 5 GHz and USB OTG). A girl can dream...
+## Setting up a new Beamer
 
-## Testing without a station
+1. Format your microSD card - FAT32, first partition sized at 4GB (or smaller).
+2. Insert the microSD card into the dongle. Note: The microSD slot is INSIDE the usb jack! Remove the dummy card that comes inside to insert the new one.
+3. Hold the button on the side of the board dongle while you plug it into your laptop, then let go. Navigate to [the flashing page](https://jendotpg.github.io/slippi-beamer/) and press flash.
+   1. "Leaving..." means its done - you don't have to wait any longer!
+   2. This only works on Chrome, sorry. If you don't want to install Chrome, you can flash using `espup`or `cargo` - see [firmware build](#build)
 
-Everything `replay-manager-for-slippi` talks to is an mDNS advertisement and five HTTP endpoints — no USB, no LED, no Wii, so the app's fleet view can be developed and tested on a laptop. Nothing needs building first:
+4. Unplug and replug the dongle to leave download mode. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`
+5. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
+   1. See [Configuring a station](#configuring-a-station) for more details on this file.
+   2. Watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go! Otherwise, you probably entered the wifi wrong. This will look like a really really really long boot followed by a screen that says "WIFI ISSUE". Other errors will also show on screen - just read it and consult the [error list](#error-labels) or [warning list](#warning-labels)
 
-```bash
-tools/fake-beamer.py --name beamer-stream-1 --port 8081 --replays ~/slp/stream1 --game ~/slp/live.slp
+## Configuring a station
+
+You can configure a Beamer by editing`CONFIG/config.txt`. It's read in full at boot and again after any edit. Keys are case-insensitive, blank lines and `#` comments are ignored, and values may be quoted. Config files larger than 4kb are rejected.
+
+| Key                  | Default        | What it does                                                                                                                                              |
+| -------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SSID`               | blank          | The network to join.                                                                                                                                      |
+| `PASSWORD`           | blank          | 8–63 characters. Blank means an open network.                                                                                                             |
+| `COUNTRY`            | `US`           | Two-letter regulatory domain:`US`, `CA`, `JP`, `GB`...                                                                                                    |
+| `HIDDEN`             | `false`        | Whether the network broadcasts its name.                                                                                                                  |
+| `STATION-NAME`       | the station ID | What to call this station. Appears as`station_name` in `GET /status` and as the station's hostname.                                                       |
+| `NUM-REPLAYS-SERVED` | `10`           | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                  |
+| `REPLAY-CAP`         | `512`          | How many replays the station counts on the card before it stops counting. 1 to 512. Past 75% it warns; at the cap it warns and stops serving new replays. |
+| `LED-BRIGHTNESS`     | `20`           | The status LED, 0 to 100 percent.                                                                                                                         |
+| `FLIP-SCREEN`        | `false`        | Whether the screen starts rotated 180 degrees. The button on the side of the dongle flips it either way at any time.                                      |
+| `DEBUG`              | `false`        | Debug mode. Don't use this unless you know what you're doing.                                                                                             |
+
+## Networking
+
+Split the venue into sections of up to ~30 setups. Each section gets one router and pool captains can only see Beamers in their section. Each setup should be within ~20 feet of the router - any further will slow things down for your pool captains.
+
+Beamers have no password of any kind so anyone who can reach one can fuck with it. Be aware of this if you choose to use venue Wifi instead of bringing your own router :P
+
+```mermaid
+flowchart TD
+    SRC["Venue WiFi / Ethernet"]
+
+    subgraph S1["section 1"]
+        RTR1["Router"]
+        BEAM1["15–30 beamers"]
+        LAP1["2–4 TO laptops"]
+        RTR1 -->|2.4 GHz| BEAM1
+        RTR1 -->|2.4 GHz| LAP1
+    end
+
+    subgraph S2["section 2"]
+        RTR2["Router"]
+        BEAM2["15–30 beamers"]
+        LAP2["2–4 TO laptops"]
+        RTR2 -->|2.4 GHz| BEAM2
+        RTR2 -->|2.4 GHz| LAP2
+    end
+
+    subgraph S3["section 3"]
+        RTR3["Router"]
+        BEAM3["15–30 beamers"]
+        LAP3["2–4 TO laptops"]
+        RTR3 -->|2.4 GHz| BEAM3
+        RTR3 -->|2.4 GHz| LAP3
+    end
+
+    SRC -->|WAN| RTR1
+    SRC -->|WAN| RTR2
+    SRC -->|WAN| RTR3
 ```
 
-The `game` object is not canned: `--game` is peeked out of a real `.slp` by a port of `beamer::slp` carried inside the script, so the character icons in the app are a real test. Run several on different ports to simulate a fleet — a client should honour the port a station advertises. `--unhealthy` and `--unreported` produce the two known failure states of `/status`.
+### Router settings
+
+Whenever your venue will let you run ethernet cables to each section, do so - it will make everything faster!
+
+#### Venue offers no ethernet
+
+| Setting   | Value                                                     | Per section |
+| --------- | --------------------------------------------------------- | ----------- |
+| Mode      | Router - wireless WAN (sometimes called WISP or repeater) | identical   |
+| WAN       | Source wifi, 5 GHz band                                   | identical   |
+| SSID      | `section-N`                                               | **unique**  |
+| LAN       | `10.N.0.0/24`                                             | **unique**  |
+| 2.4 GHz   | the venue's least-contended channel                       | identical   |
+| 5 GHz     | taken by the wan                                          | identical   |
+| DHCP      | on - pool >= 40 - reserve every station by MAC            | identical   |
+| Isolation | off                                                       | identical   |
+
+#### Venue offers ethernet
+
+| Setting   | Value                                          | Per section |
+| --------- | ---------------------------------------------- | ----------- |
+| Mode      | Router                                         | identical   |
+| WAN       | Ethernet                                       | identical   |
+| SSID      | `section-N`                                    | **unique**  |
+| LAN       | `10.N.0.0/24`                                  | **unique**  |
+| 2.4 GHz   | the venue's least-contended channel            | identical   |
+| 5 GHz     | the venue's least-contended 5 GHz channel      | identical   |
+| DHCP      | on - pool >= 40 - reserve every station by MAC | identical   |
+| Isolation | off                                            | identical   |
+
+### Choosing a router
+
+If your venue has ethernet that you can wire to each section, don't fret about this - literally any router with **256MB RAM** (that's most of them) will do! Get whatever is cheapest. If your section has <15 setups, don't even worry about the RAM requirement - 128MB will likely do fine!
+
+If you want a router that works even when the venue has no ethernet, you'll need one that supports **wireless WAN with NAT**. Most consumer routers can't do this. Make sure to get a router with **256MB RAM** otherwise connections can start to drop past about ~15 setups. Don't worry about other router features, they won't buy you any improvement! Suggestions:
+
+- GL.iNet Opal (GL-SFT1200) - ~$39. **Recommended for sections with 5-15 setups**
+- GL.iNet Beryl AX (GL-MT3000) - ~$99. **Recommended for sections with 15-25 setups**
+- GL.iNet Flint 2 (GL-MT6000) ~$169. **Recommended for sections with 25+ setups**
+- Any secondhand OpenWrt-capable router with 256MB of RAM. Netgear R7800 and Linksys WRT1900AC are common suggestions. If the stock firmware doesn't support wireless WAN with NAT (often called WISP mode), OpenWrt will - but you'll have to flash it yourself!
 
 ## HTTP API
 
-Everything a station will tell you, and the one destructive thing it will do for you, over the tournament WiFi. All responses are JSON. There is no authentication: anyone who can reach the station over HTTP can read its status and — with the confirm header below — wipe its replay drive.
+All responses are JSON. There is no authentication: anyone who can reach the station over HTTP can drive this API.
 
 | Method | Path             | What it does                                                                             |
 | ------ | ---------------- | ---------------------------------------------------------------------------------------- |
@@ -100,37 +164,58 @@ Setting `DEBUG` can sometimes add endpoints under `/debug/` - they're for me! If
 
 ### Discovery
 
-Every station advertises `_beamer._tcp` on port 80 over mDNS, and the instance name is its hostname — so a station shows up as `beamer-stream-station-2` once `STATION-NAME` is set, and as `beamer-<uuid>` before that.
+Every station advertises `_beamer._tcp` on port 80 over mDNS with the instance name as its hostname.
 
 ### `GET /status`
 
-Everything here is cached by the scan tick so this `GET` has minimal cost.`POST` the same URL to rescan on demand. `ssh` is always `false` on esp32; it is in the contract because a Pi genuinely can offer it. `game` is `null` until this station has watched a game start. `live` says whether the last replay is still being written, and `ports` carries the character, costume colour and nametag of each occupied port during the last recorded game. `replay_count` and `replay_cap` are meant to be read together: `replay_count / replay_cap` is how full the drive is, and `replay_count == replay_cap` means counting stopped there. `secs_since_port_change` and `secs_since_character_change` give estimates for how long the set has been running: "how long have players been on these ports" and "how long have players been on these characters" (note that they're only updated when a game starts, so if players plug into the same ports you need to look at character change - but if one of the players is a known counterpicker you should look at ports! if new players plug into the same ports and play the same characters youre screwed.) `rssi`, `phy_mode` and `channel` are the station's own view of its radio, refreshed every ten seconds rather than per request, and `null` until the network is up. `health` is `"ok"`, `"starting"`, `"warn"` or `"error"`. `"starting"` means the network has not finished coming up yet. `"warn"` means the `warnings` array is non-empty: the station is still theoretically recording, still serving and still safe to unplug, but something about it is off (usually the replay count is approaching cap or the Wii is failing to mount the Beamer).
+Everything here is cached by the scan tick so this `GET` is very cheap - **it's the pollable endpoint**.`POST` the same URL to rescan on demand.
 
 ```json
 {
   "schema": 1,
   "arch": "esp32",
   "firmware_version": "v0.2.2",
-  "station_id": "3f2a...",
+  "station_id": "3f2a...", # beamer uuid against factory mac address
   "station_name": "stream station 2",
   "ssid": "nycmelee",
   "rssi": -58,
   "phy_mode": "HT20",
   "channel": 6,
-  "replay_count": 47,
+  "replay_count": 47, # how many replays are stored - NOT how many are being served!
   "replay_cap": 512,
-  "ssh": false,
-  "game": null,
-  "secs_since_port_change": null,
-  "secs_since_character_change": null,
-  "health": "ok",
+  "ssh": false, # always false
+  "game": {
+    "live": false, # whether this game is still in progress
+    "ports": [
+      {
+        "port": 1,
+        "char": "Puff", # human readable
+        "char_id": 15, # matches replay-manager-for-slippi numbering
+        "color": null, # human readable, null for default
+        "costume": 0, # matches replay-manager-for-slippi numbering
+        "nametag": null
+      },
+      {
+        "port": 4,
+        "char": "Falco",
+        "char_id": 20,
+        "color": null,
+        "costume": 0,
+        "nametag": null
+      }
+    ]
+  },  # game is null until a game has been started
+  "secs_since_port_change": null, # how long have just these ports been in use
+  "secs_since_character_change": null, # how long has this ports+characters combo been in use
+  "health": "ok", # ok, starting, warn, or errror
   "warnings": []
+  # note the lack of "errors" array - errors mean the beamer is no longer functioning, so it has to be dealt with physically anyway!
 }
 ```
 
 ### `GET /SLIPPI/`
 
-Rendered when the set of published replays changes, never per request. There is no web root and nothing is copied — the index is a list of URLs and the file is served straight off the card. Doesn't include a live game that hasn't been finished
+Not re-rendered on request - this is also a cheap and acceptable endpoint to poll. Doesn't include the game that's still being written.
 
 ```json
 {
@@ -148,248 +233,217 @@ Rendered when the set of published replays changes, never per request. There is 
 
 A few notes:
 
-- `served_replay_count` is how many replays are **retrievable**; `replay_count` is how many are on the drive
-- `replay_count` stops at `replay_cap` (`REPLAY-CAP`, default 512) for performance reasons - directory walks are expensive!
-- Only `*.slp` are listed or served and filenames can't have spaces or unexpected special characters - this is meant for reading off of a Wii!
+- `served_replay_count` is how many replays are **being served**; contrast`replay_count`in `GET /status` which is how many are on the drive
+- Only `*.slp` are listed or served and filenames can't have spaces or certain special characters - this is meant for reading off of a Wii. Details are at `publish.rs::is_replay_name`.
 
 ### `GET /SLIPPI/<file>`
 
 A few notes:
 
 - Accepts `Accept-Encoding: gzip` (body comes back `Content-Encoding: gzip` with no `Content-Length`)
-- When `Range` is present, replay can't be gzipped. Answers 206
-- **`X-Replay-From: <n>` is the gzipped resume path.** `n` counts uncompressed bytes. Answers `200` with `X-Replay-From` in the return header.
-- An `X-Replay-From` offset past the end of the file gets `416`
+- `X-Replay-From: <n>` is the gzipped resume path. `n` counts uncompressed bytes. Answers `200` with `X-Replay-From` in the return header.
+- `Range` answers `206` and is the uncompressed resume path. Gzip and `Range`are mutually exclusive - `Range`wins when both are present.
 
-### Odds and ends
+### API Odds and ends
 
-`GET /` returns `403`. There is no page at the root and no directory listing anywhere; that is the endpoint working, not a broken station.
+`GET /` returns `403`. This is expected and intentional.
 
-Both POSTs take a lock, so a reset and a status refresh can never be in flight at once. The loser gets `409` immediately rather than a request that hangs.
+Posts can be refused with `409` - this is expected, handle it smoothly in application code. The beamer won't reset the drive while a game is live, so backoffs for that endpoint should be LONG.
 
-A reset is refused with `409` while a replay is going out, because unlinking a file an in-flight download has open truncates it without either end being told — and somebody mid-collection is exactly who a reset would hurt. Retry once the transfer finishes.
+## Testing without a station
 
-A reset takes the medium away and gives it straight back - this will confuse a lot of hosts! If you're mounting to a computer instead of a Wii, just delete the replays yourself.
+Everything a beamer application sees is an mDNS advertisement and five HTTP endpoints. We ship a script to offer this locally as a fake beamer.
+
+```bash
+tools/fake-beamer.py --name beamer-stream-1 --port 8081 --replays ~/slp/stream1 --game ~/slp/live.slp
+```
+
+`--game` is peeked out of a real `.slp`.Run several on different ports to simulate a fleet. `--unhealthy` and `--unreported` produce the two known failure states of `/status`.
 
 ## Beamer firmware
 
 ### Build
 
-There is one build and it targets the chip. `.cargo/config.toml` at the repo root selects `xtensa-esp32s3-espidf`, the `ldproxy` linker and the pinned ESP-IDF version, and cargo finds it by walking up from wherever you are — so `cargo build` means the firmware from any directory in the tree, and there is nothing else it could mean.
-
-It needs the esp-rs toolchain and ESP-IDF. Once, on a new machine:
+Build requires the esp-rs toolchain and ESP-IDF. If you dont have them installed:
 
 ```bash
-cargo install espup espflash ldproxy && espup install
+cargo install espup espflash ldproxy
+espup install
 ```
 
-`espup` installs the xtensa Rust fork as a rustup toolchain and writes `~/export-esp.sh`, which has to be sourced in each new shell. `ldproxy` is a separate install and is easy to miss — without it the build gets all the way to the link step and then says `linker 'ldproxy' not found`. Then:
+`espup` installs the xtensa Rust fork as a rustup toolchain and **writes `~/export-esp.sh`, which has to be sourced in each new shell**. `ldproxy` is needed for linking.
+
+To build:
 
 ```bash
-source ~/export-esp.sh && cargo build --release
+source ~/export-esp.sh
+cargo build --release
 ```
 
-Editing `components/beamer_msc/` does not, on its own, rebuild it. esp-idf-sys drives the entire ESP-IDF CMake build from its own build script, and that script tracks exactly two things: the `sdkconfig` and `sdkconfig.defaults` files. It does not track the directories named in `extra_components`. So a change to the C shim gives cargo no reason to re-run it, CMake is never invoked, the previous object file is linked, and the build succeeds with a clean log and flashes a binary that is not the code in the tree.
-
-`build.rs` refuses to let that happen: it hashes `components/`, and on a change it bumps the mtime of `sdkconfig.defaults` and fails the build, so the next one is correct. If you ever need to force it by hand:
+To build and flash onto a beamer in download mode:
 
 ```bash
-touch sdkconfig.defaults && cargo build --release
-```
-
-One command builds, flashes and opens the serial monitor. `espflash flash` takes the ELF, and `.cargo/config.toml` sets it as the cargo runner, so `cargo run` does all three. The partition table and the board's 16 MB flash size come from `espflash.toml`, so there are no flags to remember:
-
-```bash
+source ~/export-esp.sh
 cargo run --release
 ```
 
-Hold the button on the side of the board while plugging it in to enter download mode. That is not optional after the first flash: the firmware binds USB Mass Storage about 200 ms into the boot, and from that moment the serial port is gone, so espflash has nothing to reset into download mode. Every reflash needs the button.
+**Editing `components/` does not, on its own, force cargo to rebuild the C code. If you edit C code your first rebuild will fail.`build.rs` deals with this this for you - just run the build again and it will work the second time.**
+
+### Status Readout
+
+**Blinking means something is happening - DO NOT UNPLUG.**
+
+| Screen                                                         | LED Pattern                       | Meaning                                                        | Safe to Unplug? |
+| -------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------- | --------------- |
+| Loading circle                                                 | Blinking (**green**)              | Booting.                                                       | no              |
+| Station name                                                   | Solid (**green**)                 | Healthy and idle.                                              | yes             |
+| Warning label                                                  | Solid (**amber**)                 | Warning and idle.                                              | yes             |
+| `WRITING` or `SENDING`, with moving dots, over `DO NOT UNPLUG` | Blinking (**green** or **amber**) | Doing something - don't unplug. If amber, there's a warning :P | no              |
+| Error label                                                    | Solid (**red**)                   | Unhealthy.                                                     | yes             |
+| Dark, backlight off                                            | Solid (**red** or **off**)        | Stopped.                                                       | yes             |
 
 ### Error labels
 
-| Label           | What happened                                                                                             |
-| --------------- | --------------------------------------------------------------------------------------------------------- |
-| `NO ID`         | The board's factory MAC is unset or all zeroes. Refusing to boot.                                         |
-| `NO SD CARD`    | The card slot came up empty, or no card responded.                                                        |
-| `SD UNREADABLE` | A card is present but its filesystem will not mount.                                                      |
-| `WRONG FORMAT`  | A card is readable, but has no FAT32 partition or a first partition over 4 GB.                            |
-| `NO CONFIG`     | `CONFIG/config.txt` could not be read.                                                                    |
-| `BAD CONFIG`    | The file was read and rejected. The detail line names the bad key.                                        |
-| `NO USB`        | The USB stack would not start. The station halts. (A host that simply never reads is`NO WII`, a warning.) |
-| `NO WIFI`       | The ESP32 radio refused to start - this is a hardware issue                                               |
-| `NO HTTP`       | Nothing answered on port 80. It is collecting replays it cannot serve.                                    |
-| `NO MDNS`       | It will not appear in a discovery browse. Replays are unaffected.                                         |
-| `OUT OF MEMORY` | OOM - httpd shuts down. Replays are unaffected.                                                           |
-| `CRASHED`       | The firmware panicked. The faulting task is parked; the station is still recording.                       |
+| Label           | What happened                                                                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `NO ID`         | The board's factory MAC is unset or all zeroes.<br /><br />**This is a board-side hardware issue.**                                  |
+| `NO SD CARD`    | The card slot came up empty or no card responded.<br /><br />**This is probably a microSD card hardware issue.**                     |
+| `SD UNREADABLE` | A card is present but its filesystem will not mount.<br /><br />**This is probably a microSD card hardware issue.**                  |
+| `WRONG FORMAT`  | A card is readable but has no FAT32 partition or a first FAT32 partition bigger than 4 GB.<br /><br />**Reformat the microSD card**. |
+| `NO CONFIG`     | `CONFIG/config.txt` could not be read. <br /><br />**Fix config.txt.**                                                               |
+| `BAD CONFIG`    | The config file was read and rejected.<br /><br />**Fix config.txt.**                                                                |
+| `NO USB`        | The USB stack would not start.<br /><br />**This is a board-side hardware issue.**                                                   |
+| `NO WIFI`       | The ESP32 radio refused to start.<br /><br />**This is a board-side hardware issue.**                                                |
+| `NO HTTP`       | Nothing is being served over HTTP<br /><br />**DM me @jenpissgirl on Discord...**                                                    |
+| `NO MDNS`       | mDNS is not being offered<br /><br />**DM me @jenpissgirl on Discord...**                                                            |
+| `OUT OF MEMORY` | Beamer ran out of Memory<br /><br />**DM me @jenpissgirl on Discord...**                                                             |
+| `CRASHED`       | The firmware panicked somewhere.<br /><br />**DM me @jenpissgirl on Discord...**                                                     |
 
 ### Warning labels
 
-| Label           | What is off                                                                                                                       |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.                                      |
-| `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served. Delete some.                                                 |
-| `NO WII`        | Nothing has read this drive in ten seconds — a charger, a dead port, or a console that never mounted it.                          |
-| `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.                               |
-| `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.                                             |
-| `WEAK LINK`     | The wifi is likely too weak to move replays. The station still tries to operate as normal - but downloads will probably time out. |
-| `WIFI ISSUE`    | The wifi failed to associate                                                                                                      |
-| `WIFI TOO FULL` | The wifi associatedbut didn't issue an IP address - usually this means there are too many devices connected to the router         |
-| `LOW MEMORY`    | Not enough heap to take another connection. Replays are refused with`503` until there's space.                                    |
+| Label           | What is off                                                                                                                                                                                                                                                                                                                           |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.<br /><br />**Replace your microSD card - it's reached the end of its life.**                                                                                                                                                             |
+| `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served.<br /><br />**Reset drive.**                                                                                                                                                                                                                                      |
+| `NO WII`        | Nothing has read this drive in ten seconds. Usually this just means your beamer is plugged into a charger, a dead port, or a linux box that never mounted it.<br /><br />**If this beamer is plugged into a Wii: bad USB port.<br /> Otherwise ignore.**                                                                              |
+| `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.<br /><br />**Probably either a Slippi Nintendont software issue or Wii USB port hardware issue. <br />Ignore it once or twice - if it keeps coming up, try a different port.**                                                    |
+| `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.<br /><br />**Reset drive.**                                                                                                                                                                                                                     |
+| `WEAK LINK`     | The wifi signal is weak.<br /><br />**Move the router closer to this setup. <br />Sometimes ignorable - the more full your venue, the more worried you should be about this.**                                                                                                                                                        |
+| `WIFI ISSUE`    | The wifi won't connect.<br /><br />**Usually this just means you put the wrong WiFI password. Fix config.txt. If that wasn't the issue, move the router closer to this setup. The beamer antenna is not as strong as the ones in your phone and laptop!**                                                                             |
+| `WIFI TOO FULL` | The wifi connected but didn't issue an IP address - usually this means there are too many devices connected to the router.<br /><br />**Get your own router - see [choosing a router](#choosing-a-router). Sorry, the venue's router isn't cutting it for your tournament anymore. Tournament too big - good problems to have, huh?** |
+| `LOW MEMORY`    | Not enough heap to take another connection. Replays are refused with`503` until there's space.<br /><br />**Beamer is getting hammered pretty hard.<br />Ignore it once or twice - if it keeps happening, too many people are connecting to your beamer. Split into smaller sections.**                                               |
 
-### A warning about FAT cache
+### FAT cache
 
-The Wii's FAT cache lives in the Wii's memory: write a directory entry while the Wii holds the medium and the Wii's next writeback clobbers it, or both of you allocate the same clusters and a replay is lost. So the firmware writes to the volume in exactly two windows, and both work by writing only when no host can possibly hold the medium:
+USB hosts typically cache FAT directories pretty aggressively. Writing a directory entry straight to the card while a host is holding the USB will almost always lead to desynchronized states between the host and the actual drive - this causes all sorts of issues with writing over used sectors, unlinked files, etc. **As a rule, once a host has connected the FAT volume is read-only to beamer firmware**. The firmware writes to the volume in exactly two windows, both when no host holds the medium:
 
-1. Before the USB bind at boot, which is why the config is read early rather than when it is first needed. See [Boot time](#boot-time).
-2. After the host ejects, which is a clean SCSI media-change the firmware is told about. See [Eject and the durability promise](#eject-and-the-durability-promise).
+1. Before the USB bind at boot, which is why the config is read early rather than when it is first needed.
+2. After the host ejects, which is a clean SCSI media-change the firmware is told about.
 
-Everything else — serving replays over HTTP, counting files, peeking at the game in progress — is strictly read-only, and re-reads the FAT rather than trusting anything it read on a previous tick.
-
-### Boot phases
-
-| Phase                      | What                                                                                                                                                                                                                           |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ClaimIdentity`            | eFuse base MAC becomes a UUIDv5. Refuse to boot on an all-zero MAC. Spawn the status task, so the LED lights at once.                                                                                                          |
-| `MountCard`                | `sdmmc_host_init`, 4-bit bus, probe the card.                                                                                                                                                                                  |
-| `PrepareForBind`           | **The write window.** Mount FatFs read-write, read `CONFIG/config.txt`, rotate the error state, mirror `LOGS/error.txt`, write the next `LOGS/debug_N.txt` if `DEBUG` is set, seed a template `config.txt` if absent, unmount. |
-| `BindCard`                 | Present the card to the host as a USB drive.                                                                                                                                                                                   |
-| `StartJournal`             | The journal drain, the read window, the scan tick.                                                                                                                                                                             |
-| `EstablishNetworkServices` | WiFi,`esp_http_server`, mDNS `_beamer._tcp` on 80.                                                                                                                                                                             |
-| `Running`                  | The verdict loop. The boot is over.                                                                                                                                                                                            |
+Everything else is strictly read-only and re-reads the FAT rather than caching any directory entries.
 
 ### Memory
 
-**Never allocate a block larger than 512 B in Rust except during boot or after ejecting.**
+**STRICT RULE: never allocate a block larger than 512 B in Rust except during boot or after the host has ejected. Wii's don't eject, so if you ever need to guarantee a large allocation in Rust code do so during boot. We only have 320KB of DRAM - make it count!**
+
+Summaries of how those 320KB are used follow. All allocations larger than 512 bytes must be listed below unless they can fail gracefully and not take down the station (C-side `malloc` handling). In Rust code, prefer using `heapless` to allocate statically at link time instead.
 
 #### Allocated statically at link time
 
-| Consumer                     |       Bytes |                                                                                                                                                                |
-| ---------------------------- | ----------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `beamer_wbc.c` `s_data`      |      32,768 | the write-back cache:`WBC_SECTORS` = 64 sectors of 512 B                                                                                                       |
-| `beamer_gz.c` `s_arena`      |      15,360 | zlip allocations over a 1 KB window (larger windows get marginal compression benefits)                                                                         |
-| `beamer_wbc.c` `s_staging`   |       8,192 | one flush run, DMA'd straight out of`.bss`                                                                                                                     |
-| `beamer_msc.c` `s_ring`      |       8,192 | 512 transfer timings, the CBW→CSW census                                                                                                                       |
-| `beamer_log.c` `s_ring`      |       8,192 | the`esp_log` capture that becomes `LOGS/debug_N.txt`, 4,096 B of it kept per boot with the oldest lines dropped. Static - `DEBUG=false` does not give it back. |
-| `lcd.rs` `SCRATCH`           |       7,680 | one 160×24 band of the panel, so rendering never allocates                                                                                                     |
-| `http.rs` `SCRATCH`          |       6,144 | a 2 KB read chunk off the card and a 4 KB block of compressed output                                                                                           |
-| `scan.rs` `seen` + `present` |       4,160 | `REPLAY-CAP` name hashes and presence bitmap                                                                                                                   |
-| `http.rs` `BODY_BUF`         |       4,096 | `GET /status` or `GET /SLIPPI/` body                                                                                                                           |
-| `publish.rs` `index_buf`     |       2,560 | replay index json                                                                                                                                              |
-| `errors.rs` `STORE`          |       7,210 | the session, late and previous error blobs at`CAP` each, plus the entry being assembled                                                                        |
-| `reload.rs` `SCRATCH`        |       4,096 | `config.txt`, read into a fixed buffer so an oversized file is rejected rather than allocated                                                                  |
-| `scan.rs` `FAST.game`        |       1,024 | the published game blob, rendered in place by each peek                                                                                                        |
-| `journal.rs` `ENCODE_BUF`    |         861 | the NVS summary blob                                                                                                                                           |
-| TinyUSB`_mscd_epbuf`         |       4,096 | `CFG_TUD_MSC_EP_BUFSIZE`                                                                                                                                       |
-| `beamer_wbc.c` `s_meta`      |         768 | 64 slot descriptors                                                                                                                                            |
-| everything else              |      ~2,000 | descriptors, fonts, the Shift-JIS table, scalars                                                                                                               |
-| **Total**                    | **~124 KB** |                                                                                                                                                                |
+| Consumer                     |       Bytes | Description                                                                                                                                                                                              |
+| ---------------------------- | ----------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `beamer_wbc.c` `s_data`      |      32,768 | the write-back cache itself:`WBC_SECTORS=64`sectors of 512 B each                                                                                                                                        |
+| `beamer_gz.c` `s_arena`      |      15,360 | zlib allocations over a 1 KB window                                                                                                                                                                      |
+| `beamer_wbc.c` `s_staging`   |       8,192 | write back cache flush space                                                                                                                                                                             |
+| `beamer_msc.c` `s_ring`      |       8,192 | 512 transfer timings - used to track read / write time on SD cards                                                                                                                                       |
+| `beamer_log.c` `s_ring`      |       8,192 | the`esp_log` capture that becomes `LOGS/debug_N.txt`, 4,096 B of it kept per boot with the oldest lines dropped.<br /><br />because this is allocated at link time, `DEBUG=false` does not give it back. |
+| `lcd.rs` `SCRATCH`           |       7,680 | 160×24 band of the led panel                                                                                                                                                                             |
+| `http.rs` `SCRATCH`          |       6,144 | a 2 KB read chunk off the card and a 4 KB block of compressed output                                                                                                                                     |
+| `scan.rs` `seen` + `present` |       4,160 | `REPLAY-CAP` filename hashes and presence bitmap                                                                                                                                                         |
+| `http.rs` `BODY_BUF`         |       4,096 | `GET /status` or `GET /SLIPPI/` body                                                                                                                                                                     |
+| `publish.rs` `index_buf`     |       2,560 | replay index json                                                                                                                                                                                        |
+| `errors.rs` `STORE`          |       7,210 | the session, late and previous error blobs at`CAP` each, plus the summary being constructed                                                                                                              |
+| `reload.rs` `SCRATCH`        |       4,096 | `config.txt`                                                                                                                                                                                             |
+| `scan.rs` `FAST.game`        |       1,024 | the published game blob                                                                                                                                                                                  |
+| `journal.rs` `ENCODE_BUF`    |         861 | the NVS summary blob                                                                                                                                                                                     |
+| TinyUSB`_mscd_epbuf`         |       4,096 | `CFG_TUD_MSC_EP_BUFSIZE`(TinyUSB endpoint data buffer)                                                                                                                                                   |
+| `beamer_wbc.c` `s_meta`      |         768 | 64 slot descriptors                                                                                                                                                                                      |
+| everything else              |      ~2,000 |                                                                                                                                                                                                          |
+| **Total**                    | **~115 KB** |                                                                                                                                                                                                          |
 
 #### Allocated once at boot
 
-| Consumer                                                                                                                                                                            |        Bytes |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -----------: |
-| ESP-IDF's own tasks (main 8,704, TCP/IP 3,584, esp_timer 4,096, event 2,816, IPC ×2 2,560, idle ×2 3,072, FreeRTOS timer 2,048, WiFi ~3,584, mDNS 4,096, httpd 8,192) plus ~13 TCBs |      ~53,000 |
-| Firmware tasks: journal log 4,096, scan 8,192, net 8,192, health 6,144, status 4,096. The journal drain's 8,192 joins them only when`DEBUG` is set                                  |       30,720 |
-| C tasks:`beamer_msc` 6,144, `beamer_wbc` 4,096, plus TCBs and six semaphores                                                                                                        |      ~12,400 |
-| WiFi pinned RX buffers, 10 × ~1,600                                                                                                                                                 |      ~16,000 |
-| WiFi RX management buffers, 5 × ~500                                                                                                                                                |       ~2,500 |
-| mDNS steady state                                                                                                                                                                   |       ~7,000 |
-| NVS page cache                                                                                                                                                                      |       ~3,000 |
-| The read window's FatFs registration                                                                                                                                                |        2,220 |
-| The rendered reset census, two short lines held for the boot                                                                                                                        |         ~250 |
-| Journal drain task (only when`DEBUG=true`)                                                                                                                                          |        8,192 |
-| **Total**                                                                                                                                                                           | **~135,000** |
+| Consumer                                                                                                                                                                        |        Bytes |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -----------: |
+| ESP-IDF's tasks (main 8,704, TCP/IP 3,584, esp_timer 4,096, event 2,816, IPC ×2 2,560, idle ×2 3,072, FreeRTOS timer 2,048, WiFi ~3,584, mDNS 4,096, httpd 8,192) plus ~13 TCBs |      ~53,000 |
+| Firmware tasks: journal log 4,096, scan 8,192, net 8,192, status 4,096. The journal drain's 8,192 joins them only when`DEBUG` is set                                            |       24,576 |
+| C tasks:`beamer_msc` 6,144, `beamer_wbc` 4,096, plus TCBs and six semaphores                                                                                                    |      ~12,400 |
+| WiFi bring-up                                                                                                                                                                   |       49,716 |
+| httpd (includes the 8,192 stack plus lwIP's pools and the loopback control socket)                                                                                              |       13,700 |
+| mDNS                                                                                                                                                                            |        6,028 |
+| NVS page cache                                                                                                                                                                  |       ~3,000 |
+| The read window's FatFs registration                                                                                                                                            |        2,220 |
+| The rendered reset census, two short lines held for the boot                                                                                                                    |         ~250 |
+| Journal drain task (only when`DEBUG=true`)                                                                                                                                      |        8,192 |
+| **Total**                                                                                                                                                                       | **~158,500** |
 
 #### Allocated by lwIP
 
-| Consumer                                     |      Bytes |                                                                                                                                  |
-| -------------------------------------------- | ---------: | -------------------------------------------------------------------------------------------------------------------------------- |
-| One queued TCP segment                       |      1,536 | a`pbuf` of 16+56+1440 and a `tcp_seg` of 16, each +4 for TLSF                                                                    |
-| One connection's send queue,`SND_BUF` 11,520 |     12,288 | 8 segments;`LWIP_NETIF_TX_SINGLE_PBUF` rounds every one up to a full MSS                                                        |
-| **Both sockets,`max_open_sockets` = 2**      | **24,576** | what serving actually costs, since replay bytes fill every segment                                                               |
-| Four stalled readers                         |     49,152 | a closed socket keeps its queue until `MAXRTX` - note this OOM! we will refuse to offer even the third reader for this reason... |
+| Consumer                                     |      Bytes |                                                                                                                                      |
+| -------------------------------------------- | ---------: | ------------------------------------------------------------------------------------------------------------------------------------ |
+| One queued TCP segment                       |      1,536 | a`pbuf` of 16+56+1440 and a `tcp_seg` of 16, each +4 for TLSF                                                                        |
+| One connection's send queue,`SND_BUF` 11,520 |     12,288 | 8 segments;`LWIP_NETIF_TX_SINGLE_PBUF` rounds every one up to a full MSS                                                             |
+| **Both sockets,`max_open_sockets` = 2**      | **24,576** | what serving actually costs, since replay bytes fill every segment                                                                   |
+| Four stalled readers                         |     49,152 | a closed socket keeps its queue until`MAXRTX` - note this goes OOM! we will refuse to offer even the third reader for this reason... |
 
 #### Summary
 
-|                                      |    Bytes |
-| ------------------------------------ | -------: |
-| Available                            |   320 KB |
-| Allocated statically at link time    |  ~124 KB |
-| Allocated once at boot               |  ~135 KB |
-| Allocated by lwIP while serving      | 12-24 KB |
-| Free heap at rest                    |   ~51 KB |
-| Free heap while serving              | 22-34 KB |
-| Largest free block at rest           | ~31.0 KB |
-| Largest free block during a download |  ~9.0 KB |
+|                                            |    Bytes |
+| ------------------------------------------ | -------: |
+| Available                                  |   320 KB |
+| Allocated statically at link time          |  ~115 KB |
+| Allocated once at boot,`DEBUG=true`        |  ~155 KB |
+| ...without the journal drain,`DEBUG=false` |  ~147 KB |
+| Allocated by lwIP while serving            | 12-24 KB |
+| Free heap at rest                          |   ~51 KB |
+| Free heap while serving                    |   ~50 KB |
+| Largest free block at rest                 | ~31.0 KB |
+| Largest free block during a download       |  ~7.5 KB |
 
-### Releasing
+### Firmware odds and ends
 
-Pushing a `v*` tag builds the firmware in GitHub Actions and leaves a draft release carrying `beamer.bin`.
+#### Card size
 
-```bash
-git tag v1.2.3 && git push origin v1.2.3
-```
-
-This creates a draft, not a new release - go manually publish the draft in Github!
-
-### Details
-
-#### Basics
-
-`std` Rust on ESP-IDF, via `esp-idf-hal` / `esp-idf-svc` / `esp-idf-sys`. ESP-IDF provides a newlib environment, so this is real `std` — ordinary error handling, `serde_json` for the report writers — plus direct access to the C components underneath: TinyUSB for Mass Storage, FatFs for the volume, `esp_http_server`, `esp_wifi`, `mdns`, `esp_lcd`.
-There are two FFI components:
-
-1. `components/beamer_msc` wraps TinyUSB (and implements the write-back cache)
-2. `components/beamer_gz` wraps zlib
-
-#### Storage odds and ends
-
-##### Card size
-
-Format the replay partition (the first FAT32 partition) to about 4 GB with 4 KB clusters. If you don't do this, shit breaks. The host sees exactly as much disk as the partition describes.
-
-The volume is only written during two windows, and everything else that touches it is read-only:
-
-1. `PrepareForBind`, before the USB bind, when no host can possibly hold the medium.
-2. After the host ejects.
-
-Everything read outside those windows invalidates the FatFs cache.
-
-Durable state — the identity, the last-good WiFi config, and the log ring persisted on error — lives in NVS.
+Format the replay partition (the first FAT32 partition) to about 4 GB with 4 KB clusters. If you don't do this, shit breaks.
 
 #### Fleet determinism
 
-A station's behaviour must be a function of its config file and nothing else. This makes management easy. Don't try and be nice and forgive bad conflicts - fleets will drift and debugging will
+A station's behaviour must be a function of its config file and nothing else.
 
 #### The RAM write-back cache
 
-32 KB of internal SRAM sits between the host and the card — 41 KB once the flush staging buffer and the slot metadata are counted, which is what it costs the heap ceiling. A write lands in RAM and returns; a task behind it moves sectors out. That shields Slippi Nintendont from the the SD card stalling ()the spec permits a card to hold busy for 250 ms on a single-block write).
+32 KB of internal SRAM sits between the host and the card. Writes land in RAM and return immediately while a draining task moves those cached sectors onto the card. This shields hosts from the SD card stalls (which can honestly be quite frequent). While a sector is dirty, ejects can seriously mess up the state of the microSD card. This is why there are `BUSY` states to tell TOs not to unplug.
 
-While a sector is dirty, the host believes a write landed that has not, and pulling the cable loses it. This is the reason for the `BUSY` state that tells TO not to unplug sometimes, including during a live game.
-
-Errors quiesce the cache before the LED turns red by switching to write-through - that way an Error'd beamer can be safely pulled from a Wii.
+Errors quiesce the cache before the LED turns red by switching to write-through - that way an error'd beamer can be safely pulled without ejecting.
 
 #### FreeRTOS tasks
 
-Keyed by the task's real name, because that is what a panic backtrace, a coredump listing and `uxTaskGetSystemState` print — not the prose label.
+I really make an effort to keep this table up to date - it's not trivially self documenting.
 
-| Task                                                                               | Priority               | Core | Created at                               |
-| ---------------------------------------------------------------------------------- | ---------------------- | ---- | ---------------------------------------- |
-| `beamer_msc` — the TinyUSB device loop, and the SCSI callbacks that reach the card | 22                     | 1    | `components/beamer_msc/beamer_msc.c:628` |
-| `beamer_wbc` — the write-back cache flush                                          | 10                     | 1    | `components/beamer_msc/beamer_wbc.c:235` |
-| `httpd` — `esp_http_server`. ESP-IDF creates it; the firmware only configures it   | 5                      | 0    | `src/net/http.rs:28`                     |
-| `net` — WiFi association, then HTTP and mDNS bring-up                              | 4                      | 0    | `src/net/mod.rs:120`                     |
-| `scan` — the 10 s tick                                                             | 4                      | 0    | `src/scan.rs:89`                         |
-| `status` — the LED and the panel                                                   | 3                      | 0    | `src/status/mod.rs:182`                  |
-| `health` — the network health tick                                                 | 2                      | 0    | `src/net/check.rs:35`                    |
-| `journal` — journal, when in debug mode                                            | 1                      | 1    | `src/journal.rs:1037`                    |
-| `jrnl-log` — the `esp_log` capture drain, and the UART write                       | 1                      | 1    | `src/journal.rs:980`                     |
-| `main` — runs `boot::run` and returns                                              | 1, the ESP-IDF default | 0    | `CONFIG_ESP_MAIN_TASK_AFFINITY_CPU0`     |
+| Task                        | Priority               | Core | Created at                           |
+| --------------------------- | ---------------------- | ---- | ------------------------------------ |
+| `beamer_msc`                | 22                     | 1    | `components/beamer_msc/beamer_msc.c` |
+| `beamer_wbc`                | 10                     | 1    | `components/beamer_msc/beamer_wbc.c` |
+| `httpd` (`esp_http_server`) | 5                      | 0    | `src/net/http.rs`                    |
+| `net`                       | 4                      | 0    | `src/net/mod.rs`                     |
+| `scan`                      | 4                      | 0    | `src/scan.rs`                        |
+| `status`                    | 3                      | 0    | `src/status/mod.rs`                  |
+| `journal` (DEBUG only)      | 1                      | 1    | `src/journal.rs`                     |
+| `jrnl-log`                  | 1                      | 1    | `src/journal.rs`                     |
+| `main`                      | 1, the ESP-IDF default | 0    | `CONFIG_ESP_MAIN_TASK_AFFINITY_CPU0` |
 
 #### Station Identity
 
-Each board assigns its own, at first boot: a UUIDv5 over the chip's factory-programmed base MAC (hashed as lowercase colonless hex) against the same fixed project namespace upstream uses. The USB serial descriptor becomes `BEAMER-<uuid>`. Reflashing a board keeps the same identity, because the MAC is in eFuse and the firmware never writes it.
+Each board assigns itself a `station_id` at first boot: a UUIDv5 over the chip's factory-programmed base MAC (hashed as lowercase colonless hex) against a fixed project namespace. Reflashing a board thus keeps the same `station_id`.
 
-The hostname comes from `STATION-NAME`, not from the UUID, and is re-derived on every boot: renaming a station in `config.txt` renames it on the network at the next power cycle. The name is slugged — lowercased, every run of anything outside `[a-z0-9]` collapsed to one hyphen, trimmed of leading and trailing hyphens, cut to 56 characters — and `beamer-` is prefixed to it. `Stream Station 2` becomes `beamer-stream-station-2`. As a result, names that slug to nothing fall back to the ID**.** `STATION-NAME=拉拉` is a perfectly good name for `GET /status`, and it carries there in full — but there is no hostname in it, so that station stays `beamer-<uuid>`.
-
-Nothing enforces uniqueness. Two stations named `Setup 2` claim the same hostname, the same way two hosts on any network would; the UUID underneath them stays distinct, and that is what `GET /status` and the replay index report.
+The hostname comes from `STATION-NAME`, which itself comes from`config.txt`. The hostname is slugged and `beamer-` is prefixed to it. `Stream Station 2` becomes `beamer-stream-station-2`. Some names don't slug clenly and fall back to `station_id`. For example,`STATION-NAME=拉拉`is a perfectly valid station name and works great with`GET /status`- but it would slug empty, so that station's hostname is `beamer-$UUID`. Nothing enforces hostname or `STATION-name` uniqueness: two stations named `Setup 2`claim the same hostname the same way two hosts on any network would. The `station_id` stays unique and can be used to distinguish them application-side.
