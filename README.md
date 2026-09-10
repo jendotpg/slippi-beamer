@@ -4,31 +4,24 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. remove debug/zeros (its a nightmare and we already know what we wanted from it)
-2. remove all the built-up timing + memory instrumentation. we don't really need it anymore. we can save it as a branch so that its easy to pull back what we want in the future.
-3. update tcp priorities
+1. update tcp priorities
    1. always respond to mDNS requests first and foremost
    2. 503 when busy instead of not responding?
 
-4. make "DRIVE FAILING", "WIFI ISSUE", "WIFI TOO FULL" errors instead of a warning
+2. make "DRIVE FAILING", "WIFI ISSUE", "WIFI TOO FULL" errors instead of a warning
    1. a warning is either fixable OTA or usually ignorable. these three require physical intervention - they should be errors!
 
-5. even more memory optimizations:
-   1. lower `CFG_TUD_MSC_EP_BUFSIZE`? this is full-speed, not high-speed...
-   2. make all the "allocated once at boot" firmware and c tasks statically allocated at link time!
-      1. then we can merge the "Allocated by lwIP" and "allocated once at boot" into an "allocated by c libraries" table with a column for "at boot" or "during run-time"
-      2. we can also update the rule - NEVER allocate more than 512 B dynamically in rust code, and make sure all C code can fail gracefully!
-   3. look into lwIP allocations in `.bss` again... it would be so lovely to not worry about those like we do now.....
-
-6. redesign screen:
+3. redesign screen:
    1. always show station name (unless error or booting)
    2. icon in the top-right for when there's an error state
    3. icon in the bottom-right for when there's a busy state
 
-7. support other boards with different pinouts? different build options, maybe?
+4. remove debug/zeros (its a nightmare and we already know what we wanted from it)
+5. remove all the built-up timing + memory instrumentation. we don't really need it anymore. we can save it as a branch so that its easy to pull back what we want in the future.
+6. support other boards with different pinouts? different build options, maybe?
    1. order and test Waveshare ESP32-S3-LCD-1.47 version
 
-8. colorblind mode? blue instead of amber?
+7. colorblind mode? blue instead of amber?
 
 ## Hardware
 
@@ -344,14 +337,13 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 
 ### Memory
 
-**STRICT RULE: never allocate a block larger than 512 B in Rust except during boot or after the host has ejected. Wii's don't eject, so if you ever need to guarantee a large allocation in Rust code do so during boot. We only have 320KB of DRAM - make it count!**
-
-Summaries of how those 320KB are used follow. All allocations larger than 512 bytes must be listed below unless they can fail gracefully and not take down the station (C-side `malloc` handling). In Rust code, prefer using `heapless` to allocate statically at link time instead.
+**Dynamic allocation follows a strict rule: never allocate a block larger than 512B once the station is `Running` unless the station can stay fully operational if that allocation fails.** Prefer moving large allocations off the heap wherever possible. In Rust, this usually means `static` or `heapless` - in C it usually means a file-scope `static`. Exceptions can be made in debug mode(`journal`'s log tail is currently the only one).
 
 #### Allocated statically at link time
 
 | Consumer                     |       Bytes | Description                                                                                                                                                                                              |
 | ---------------------------- | ----------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ESP-IDF and its libraries    |      43,540 | WiFi/PHY/supplicant 12,314, FreeRTOS 4,732 (mostly`port_IntStack`), the `esp-idf-*` crates 1,843, Rust `std`/`core` 1,643, lwIP 335, a 16,474 tail, and 6,199 of padding                                 |
 | `beamer_wbc.c` `s_data`      |      32,768 | the write-back cache itself:`WBC_SECTORS=64`sectors of 512 B each                                                                                                                                        |
 | `beamer_gz.c` `s_arena`      |      15,360 | zlib allocations over a 1 KB window                                                                                                                                                                      |
 | `beamer_wbc.c` `s_staging`   |       8,192 | write back cache flush space                                                                                                                                                                             |
@@ -366,10 +358,12 @@ Summaries of how those 320KB are used follow. All allocations larger than 512 by
 | `reload.rs` `SCRATCH`        |       4,096 | `config.txt`                                                                                                                                                                                             |
 | `scan.rs` `FAST.game`        |       1,024 | the published game blob                                                                                                                                                                                  |
 | `journal.rs` `ENCODE_BUF`    |         861 | the NVS summary blob                                                                                                                                                                                     |
-| TinyUSB`_mscd_epbuf`         |       4,096 | `CFG_TUD_MSC_EP_BUFSIZE`(TinyUSB endpoint data buffer)                                                                                                                                                   |
+| TinyUSB`_mscd_epbuf`         |       2,048 | `CFG_TUD_MSC_EP_BUFSIZE`(TinyUSB endpoint data buffer)                                                                                                                                                   |
+| `beamer_msc.c` `s_stack`     |       6,144 | `beamer_msc` task stack                                                                                                                                                                                  |
+| `beamer_wbc.c` `s_stack`     |       4,096 | `beamer_wbc` flush task stack                                                                                                                                                                            |
 | `beamer_wbc.c` `s_meta`      |         768 | 64 slot descriptors                                                                                                                                                                                      |
-| everything else              |      ~2,000 |                                                                                                                                                                                                          |
-| **Total**                    | **~115 KB** |                                                                                                                                                                                                          |
+| everything else              |       4,029 |                                                                                                                                                                                                          |
+| **Total**                    | **167 KiB** |                                                                                                                                                                                                          |
 
 #### Allocated once at boot
 
@@ -377,38 +371,39 @@ Summaries of how those 320KB are used follow. All allocations larger than 512 by
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -----------: |
 | ESP-IDF's tasks (main 8,704, TCP/IP 3,584, esp_timer 4,096, event 2,816, IPC ×2 2,560, idle ×2 3,072, FreeRTOS timer 2,048, WiFi ~3,584, mDNS 4,096, httpd 8,192) plus ~13 TCBs |      ~53,000 |
 | Firmware tasks: journal log 4,096, scan 8,192, net 8,192, status 4,096. The journal drain's 8,192 joins them only when`DEBUG` is set                                            |       24,576 |
-| C tasks:`beamer_msc` 6,144, `beamer_wbc` 4,096, plus TCBs and six semaphores                                                                                                    |      ~12,400 |
-| WiFi bring-up                                                                                                                                                                   |       49,716 |
-| httpd (includes the 8,192 stack plus lwIP's pools and the loopback control socket)                                                                                              |       13,700 |
-| mDNS                                                                                                                                                                            |        6,028 |
+| WiFi (minus the`.bss` portion)                                                                                                                                                  |       21,950 |
+| httpd's lwIP pools and loopback control socket                                                                                                                                  |        5,508 |
+| mDNS (minus the`.bss` portion)                                                                                                                                                  |        1,932 |
 | NVS page cache                                                                                                                                                                  |       ~3,000 |
 | The read window's FatFs registration                                                                                                                                            |        2,220 |
 | The rendered reset census, two short lines held for the boot                                                                                                                    |         ~250 |
 | Journal drain task (only when`DEBUG=true`)                                                                                                                                      |        8,192 |
-| **Total**                                                                                                                                                                       | **~158,500** |
+| **Total**                                                                                                                                                                       | **~118 KiB** |
 
 #### Allocated by lwIP
 
-| Consumer                                     |      Bytes |                                                                                                                                      |
-| -------------------------------------------- | ---------: | ------------------------------------------------------------------------------------------------------------------------------------ |
-| One queued TCP segment                       |      1,536 | a`pbuf` of 16+56+1440 and a `tcp_seg` of 16, each +4 for TLSF                                                                        |
-| One connection's send queue,`SND_BUF` 11,520 |     12,288 | 8 segments;`LWIP_NETIF_TX_SINGLE_PBUF` rounds every one up to a full MSS                                                             |
-| **Both sockets,`max_open_sockets` = 2**      | **24,576** | what serving actually costs, since replay bytes fill every segment                                                                   |
-| Four stalled readers                         |     49,152 | a closed socket keeps its queue until`MAXRTX` - note this goes OOM! we will refuse to offer even the third reader for this reason... |
+| Consumer                                     |      Bytes |                                                                          |
+| -------------------------------------------- | ---------: | ------------------------------------------------------------------------ |
+| One queued TCP segment                       |      1,536 | a`pbuf` of 16+56+1440 and a `tcp_seg` of 16, each +4 for TLSF            |
+| One connection's send queue,`SND_BUF` 11,520 |     12,288 | 8 segments;`LWIP_NETIF_TX_SINGLE_PBUF` rounds every one up to a full MSS |
+| **Both sockets,`max_open_sockets` = 2**      | **24,576** | what serving actually costs, since replay bytes fill every segment       |
 
 #### Summary
 
-|                                            |    Bytes |
-| ------------------------------------------ | -------: |
-| Available                                  |   320 KB |
-| Allocated statically at link time          |  ~115 KB |
-| Allocated once at boot,`DEBUG=true`        |  ~155 KB |
-| ...without the journal drain,`DEBUG=false` |  ~147 KB |
-| Allocated by lwIP while serving            | 12-24 KB |
-| Free heap at rest                          |   ~51 KB |
-| Free heap while serving                    |   ~50 KB |
-| Largest free block at rest                 | ~31.0 KB |
-| Largest free block during a download       |  ~7.5 KB |
+|                                       |      Bytes |
+| ------------------------------------- | ---------: |
+| Total SRAM                            |    512 KiB |
+| ...instruction cache and ROM reserved |     80 KiB |
+| ...IRAM, the firmware's own code      |     94 KiB |
+| ...allocated statically at link time  |    167 KiB |
+| ...left for the heap                  |    171 KiB |
+| Allocated once at boot,`DEBUG=false`  |   ~110 KiB |
+| ...`DEBUG=true`                       |   ~118 KiB |
+| Allocated by lwIP while serving       |  12-24 KiB |
+| Free heap at rest                     | ~50-60 KiB |
+| Free heap while serving               | ~25-50 KiB |
+| Largest free block at rest            |    ~31 KiB |
+| Largest free block while serving      |   ~7.5 KiB |
 
 ### Firmware odds and ends
 

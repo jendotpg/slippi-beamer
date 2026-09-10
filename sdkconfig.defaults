@@ -35,3 +35,18 @@ CONFIG_LWIP_TCP_MAXRTX=3
 CONFIG_LWIP_MAX_ACTIVE_TCP=2
 CONFIG_LWIP_TCP_MSL=5000
 CONFIG_LWIP_TCP_MSS=1440
+
+# A request never spans a segment, so out-of-order queuing only costs heap.
+CONFIG_LWIP_TCP_QUEUE_OOSEQ=n
+
+# CONFIG_LWIP_DHCPS=n does not link: esp-idf-svc's EspNetif::new_with_conf
+# references esp_netif_dhcps_option unconditionally, station-only or not.
+
+# Ceilings, not preallocated arrays - MEMP_MEM_MALLOC is on. Two httpd sockets,
+# its listener, its loopback control socket, and mDNS.
+CONFIG_LWIP_MAX_UDP_PCBS=6
+CONFIG_LWIP_MAX_RAW_PCBS=4
+CONFIG_LWIP_MAX_LISTENING_TCP=4
+
+# IPv4 only - src/net/wifi.rs is Configuration::Client with Ipv4Addr throughout.
+CONFIG_LWIP_IPV6=n

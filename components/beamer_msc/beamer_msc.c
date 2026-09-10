@@ -576,6 +576,12 @@ static struct
     esp_err_t err;
 } s_init;
 
+#define MSC_STACK 6144
+
+static StaticSemaphore_t s_init_done_buf;
+static StackType_t s_stack[MSC_STACK];
+static StaticTask_t s_tcb;
+
 static void beamer_msc_task(void *arg)
 {
     (void)arg;
@@ -627,12 +633,11 @@ esp_err_t beamer_msc_install(sdmmc_card_t *card, SemaphoreHandle_t lock, const c
     strlcpy(s_serial, serial, sizeof(s_serial));
     ESP_RETURN_ON_ERROR(beamer_wbc_start(card, lock), TAG, "write-back cache");
 
-    s_init.done = xSemaphoreCreateBinary();
-    ESP_RETURN_ON_FALSE(s_init.done, ESP_ERR_NO_MEM, TAG, "init semaphore");
+    s_init.done = xSemaphoreCreateBinaryStatic(&s_init_done_buf);
     s_init.err = ESP_FAIL;
 
-    BaseType_t ok = xTaskCreatePinnedToCore(beamer_msc_task, "beamer_msc", 6144, NULL, 22, NULL, 1);
-    ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "task create");
+    xTaskCreateStaticPinnedToCore(beamer_msc_task, "beamer_msc", MSC_STACK, NULL, 22, s_stack,
+                                  &s_tcb, 1);
 
     xSemaphoreTake(s_init.done, portMAX_DELAY);
     ESP_RETURN_ON_ERROR(s_init.err, TAG, "tinyusb bring-up");
@@ -651,6 +656,9 @@ esp_err_t beamer_msc_install(sdmmc_card_t *card, SemaphoreHandle_t lock, const c
 #define BEAMER_SD_D3 18
 
 #define BEAMER_SD_FREQ_KHZ SDMMC_FREQ_DEFAULT
+
+static sdmmc_card_t s_card_storage;
+static StaticSemaphore_t s_sd_lock_buf;
 
 esp_err_t beamer_sd_init(sdmmc_card_t **out_card, SemaphoreHandle_t *out_lock)
 {
@@ -681,33 +689,20 @@ esp_err_t beamer_sd_init(sdmmc_card_t **out_card, SemaphoreHandle_t *out_lock)
         return err;
     }
 
-    sdmmc_card_t *card = calloc(1, sizeof(sdmmc_card_t));
-    if (card == NULL)
-    {
-        host.deinit();
-        return ESP_ERR_NO_MEM;
-    }
+    sdmmc_card_t *card = &s_card_storage;
+    memset(card, 0, sizeof(*card));
 
     err = sdmmc_card_init(&host, card);
     if (err != ESP_OK)
     {
-        free(card);
         host.deinit();
         return err;
     }
     ESP_LOGI(TAG, "card probed at %d kHz, %d-bit", host.max_freq_khz,
              (int)sdmmc_host_get_slot_width(host.slot));
 
-    SemaphoreHandle_t lock = xSemaphoreCreateMutex();
-    if (lock == NULL)
-    {
-        free(card);
-        host.deinit();
-        return ESP_ERR_NO_MEM;
-    }
-
     *out_card = card;
-    *out_lock = lock;
+    *out_lock = xSemaphoreCreateMutexStatic(&s_sd_lock_buf);
     return ESP_OK;
 }
 

@@ -58,6 +58,15 @@ static atomic_uint s_read_wait_max_us;
 static SemaphoreHandle_t s_work; // wakes flush
 static SemaphoreHandle_t s_room; // wakes "out of sloots" writer
 
+#define WBC_STACK 4096
+
+static StaticSemaphore_t s_meta_lock_buf;
+static StaticSemaphore_t s_flush_lock_buf;
+static StaticSemaphore_t s_work_buf;
+static StaticSemaphore_t s_room_buf;
+static StackType_t s_stack[WBC_STACK];
+static StaticTask_t s_tcb;
+
 static int find(uint32_t lba)
 {
     for (int i = 0; i < WBC_SECTORS; i++)
@@ -224,21 +233,13 @@ esp_err_t beamer_wbc_start(sdmmc_card_t *card, SemaphoreHandle_t lock)
     s_card = card;
     s_lock = lock;
 
-    s_meta_lock = xSemaphoreCreateMutex();
-    s_flush_lock = xSemaphoreCreateMutex();
-    s_work = xSemaphoreCreateBinary();
-    s_room = xSemaphoreCreateBinary();
-    if (s_meta_lock == NULL || s_flush_lock == NULL || s_work == NULL || s_room == NULL)
-    {
-        return ESP_ERR_NO_MEM;
-    }
+    s_meta_lock = xSemaphoreCreateMutexStatic(&s_meta_lock_buf);
+    s_flush_lock = xSemaphoreCreateMutexStatic(&s_flush_lock_buf);
+    s_work = xSemaphoreCreateBinaryStatic(&s_work_buf);
+    s_room = xSemaphoreCreateBinaryStatic(&s_room_buf);
 
-    const BaseType_t ok =
-        xTaskCreatePinnedToCore(wbc_flush_task, "beamer_wbc", 4096, NULL, 10, NULL, 1);
-    if (ok != pdPASS)
-    {
-        return ESP_ERR_NO_MEM;
-    }
+    xTaskCreateStaticPinnedToCore(wbc_flush_task, "beamer_wbc", WBC_STACK, NULL, 10, s_stack,
+                                  &s_tcb, 1);
     ESP_LOGI(TAG, "write-back cache: %d sectors, %d KB", WBC_SECTORS,
              (WBC_SECTORS * WBC_SECTOR_SZ) / 1024);
     return ESP_OK;
