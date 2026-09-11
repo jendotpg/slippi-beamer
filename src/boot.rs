@@ -344,7 +344,7 @@ fn eject(sd: &SdCard, id: &StationId) {
     log::info!("eject complete: safe to unplug");
 }
 
-const READY_GRACE: Duration = Duration::from_secs(15); // lower would mean CONNECT_TIMEOUT hasn't elapsed yet
+const READY_GRACE: Duration = Duration::from_secs(17); // lower would mean CONNECT_TIMEOUT hasn't elapsed yet
 
 const EJECT_GRACE: Duration = Duration::from_secs(3);
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(30);
