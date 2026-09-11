@@ -4,10 +4,8 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. make "DRIVE FAILING", "WIFI ISSUE", "WIFI TOO FULL" errors instead of a warning
-   1. a warning is either fixable OTA or usually ignorable. these three require physical intervention - they should be errors!
-
-2. fix "NO WII" not working right
+1. `Retry-After` should only be 15 seconds for replay pulls - otherwise shorter is fine!
+2. make no wifi warning fire after 20 seconds instead of 90
 3. redesign screen:
    1. always show station name (unless error or booting)
    2. icon in the top-right for when there's an error state
@@ -95,44 +93,44 @@ flowchart TD
 
 ### Router settings
 
-Whenever your venue will let you run ethernet cables to each section, do so - it will make everything faster!
+Whenever your venue will let you run ethernet cables to each section, do so - it will let you put laptops on 5GHz, which is a significant speedup! I like to set gateways to `10.N.0.1`and SSIDs to `beamer-N` but you can do whatever you want here. Make sure the SSIDs are unique to each section, though.
 
 #### Venue offers no ethernet
 
-| Setting   | Value                                                     | Per section |
-| --------- | --------------------------------------------------------- | ----------- |
-| Mode      | Router - wireless WAN (sometimes called WISP or repeater) | identical   |
-| WAN       | Source wifi, 5 GHz band                                   | identical   |
-| SSID      | `section-N`                                               | **unique**  |
-| LAN       | `10.N.0.0/24`                                             | **unique**  |
-| 2.4 GHz   | the venue's least-contended channel                       | identical   |
-| 5 GHz     | taken by the wan                                          | identical   |
-| DHCP      | on - pool >= 40 - reserve every station by MAC            | identical   |
-| Isolation | off                                                       | identical   |
+| Setting   | Value                                                | Per section |
+| --------- | ---------------------------------------------------- | ----------- |
+| Mode      | Router - repeater (also called WISP or wireless WAN) | identical   |
+| WAN       | Source wifi, 5 GHz band                              | identical   |
+| SSID      | `beamer-N`(this is really just a preference)         | **unique**  |
+| LAN       | `10.N.0.0/24`                                        | **unique**  |
+| 2.4 GHz   | the venue's least-contended channel                  | identical   |
+| 5 GHz     | taken by the wan (turn off!)                         | identical   |
+| DHCP      | on                                                   | identical   |
+| Isolation | off                                                  | identical   |
 
 #### Venue offers ethernet
 
-| Setting   | Value                                          | Per section |
-| --------- | ---------------------------------------------- | ----------- |
-| Mode      | Router                                         | identical   |
-| WAN       | Ethernet                                       | identical   |
-| SSID      | `section-N`                                    | **unique**  |
-| LAN       | `10.N.0.0/24`                                  | **unique**  |
-| 2.4 GHz   | the venue's least-contended channel            | identical   |
-| 5 GHz     | the venue's least-contended 5 GHz channel      | identical   |
-| DHCP      | on - pool >= 40 - reserve every station by MAC | identical   |
-| Isolation | off                                            | identical   |
+| Setting   | Value                                     | Per section |
+| --------- | ----------------------------------------- | ----------- |
+| Mode      | Router                                    | identical   |
+| WAN       | Ethernet                                  | identical   |
+| SSID      | `beamer-N`(suggested)                     | **unique**  |
+| LAN       | `10.N.0.0/24`                             | **unique**  |
+| 2.4 GHz   | the venue's least-contended channel       | identical   |
+| 5 GHz     | the venue's least-contended 5 GHz channel | identical   |
+| DHCP      | on                                        | identical   |
+| Isolation | off                                       | identical   |
 
 ### Choosing a router
 
-If your venue has ethernet that you can wire to each section, don't fret about this - literally any router with **256MB RAM** (that's most of them) will do! Get whatever is cheapest. If your section has <15 setups, don't even worry about the RAM requirement - 128MB will likely do fine!
+If your venue has ethernet that you can wire to each section, don't fret about this - literally any router with **256MB RAM** (that's most of them that aren't like .... travel routers) will do! Get whatever is cheapest. If your section has <15 setups, don't even worry about the RAM requirement - 128MB will likely do fine!
 
-If you want a router that works even when the venue has no ethernet, you'll need one that supports **wireless WAN with NAT**. Most consumer routers can't do this. Make sure to get a router with **256MB RAM** otherwise connections can start to drop past about ~15 setups. Don't worry about other router features, they won't buy you any improvement! Suggestions:
+If you want a router that works even when the venue has no ethernet, you'll need one that supports **wireless WAN with NAT**. Most consumer routers can't do this out of the box. Make sure to get a router with **256MB RAM** otherwise connections can start to drop past about ~15 setups. Don't worry about other router features, they won't buy you any improvement! Suggestions:
 
 - GL.iNet Opal (GL-SFT1200) - ~$39. **Recommended for sections with 5-15 setups**
 - GL.iNet Beryl AX (GL-MT3000) - ~$99. **Recommended for sections with 15-25 setups**
 - GL.iNet Flint 2 (GL-MT6000) ~$169. **Recommended for sections with 25+ setups**
-- Any secondhand OpenWrt-capable router with 256MB of RAM. Netgear R7800 and Linksys WRT1900AC are common suggestions. If the stock firmware doesn't support wireless WAN with NAT (often called WISP mode), OpenWrt will - but you'll have to flash it yourself!
+- Any secondhand OpenWrt-capable router with 256MB of RAM. Netgear R7800 and Linksys WRT1900AC are common suggestions. If the stock firmware doesn't support wireless WAN with NAT (often called WISP mode), OpenWrt will - but you'll have to flash it yourself! **This is usually the cheapest option, but will require some technical know-how.**
 
 ## HTTP API
 
@@ -237,7 +235,7 @@ A few notes:
 
 Posts can be refused with `409` - this is expected, handle it smoothly in application code. The beamer won't reset the drive while a game is live, so backoffs for that endpoint should be LONG.
 
-Sometimes an transfer will come back `503` - this usually means another application is already pulling from the beamer. Sometimes it's because of memory pressure for some other reason.
+Sometimes an transfer will come back `503` - this usually means another application is already pulling from the beamer. Sometimes it's because of memory pressure for some other reason. Application code should respect the `Retry-After`.
 
 ## Testing without a station
 
@@ -364,18 +362,18 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 
 #### Allocated once at boot
 
-| Consumer                                                                                                                                                                        |        Bytes |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -----------: |
-| ESP-IDF's tasks (main 8,704, TCP/IP 3,584, esp_timer 4,096, event 2,816, IPC ×2 2,560, idle ×2 3,072, FreeRTOS timer 2,048, WiFi ~3,584, mDNS 4,096, httpd 8,192) plus ~13 TCBs |      ~53,000 |
-| Firmware tasks: journal log 4,096, scan 8,192, net 8,192, status 4,096, transfer 6,144. The journal drain's 8,192 joins them only when`DEBUG` is set                            |       30,720 |
-| WiFi (minus the`.bss` portion)                                                                                                                                                  |       21,950 |
-| httpd's lwIP pools and loopback control socket                                                                                                                                  |        5,508 |
-| mDNS (minus the`.bss` portion)                                                                                                                                                  |        1,932 |
-| NVS page cache                                                                                                                                                                  |       ~3,000 |
-| The read window's FatFs registration                                                                                                                                            |        2,220 |
-| The rendered reset census, two short lines held for the boot                                                                                                                    |         ~250 |
-| Journal drain task (only when`DEBUG=true`)                                                                                                                                      |        8,192 |
-| **Total**                                                                                                                                                                       | **~124 KiB** |
+| Consumer                                                                                                                                                                                                                     |        Bytes |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -----------: |
+| ESP-IDF's tasks (main 8,704, TCP/IP 3,584, esp_timer 4,096, event 2,816, IPC ×2 2,560, idle ×2 3,072, FreeRTOS timer 2,048, WiFi ~3,584, mDNS 4,096, httpd 8,192) plus ~13 TCBs                                              |      ~53,000 |
+| Firmware tasks: journal log 4,096, scan 8,192, net 8,192, status 4,096, transfer 6,144 (peaks at 3,352 B, and does not move with how well a replay compresses). The journal drain's 8,192 joins them only when`DEBUG` is set |       30,720 |
+| WiFi (minus the`.bss` portion)                                                                                                                                                                                               |       21,950 |
+| httpd's lwIP pools and loopback control socket                                                                                                                                                                               |        5,508 |
+| mDNS (minus the`.bss` portion)                                                                                                                                                                                               |        1,932 |
+| NVS page cache                                                                                                                                                                                                               |       ~3,000 |
+| The read window's FatFs registration                                                                                                                                                                                         |        2,220 |
+| The rendered reset census, two short lines held for the boot                                                                                                                                                                 |         ~250 |
+| Journal drain task (only when`DEBUG=true`)                                                                                                                                                                                   |        8,192 |
+| **Total**                                                                                                                                                                                                                    | **~124 KiB** |
 
 #### Allocated by lwIP
 
@@ -398,7 +396,7 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | ...left for the heap                  |    171 KiB |
 | Allocated once at boot,`DEBUG=false`  |   ~116 KiB |
 | ...`DEBUG=true`                       |   ~124 KiB |
-| Allocated by lwIP while serving       |  12-24 KiB |
+| Allocated by lwIP while serving       |   9-18 KiB |
 | Free heap at rest                     | ~45-46 KiB |
 | Free heap while serving               | ~25-45 KiB |
 | Largest free block at rest            |    ~31 KiB |

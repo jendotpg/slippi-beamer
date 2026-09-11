@@ -182,36 +182,6 @@ pub fn run() -> anyhow::Result<()> {
         }
         let settled = !waiting || usb_since.elapsed() >= HOST_GRACE;
 
-        let now = if !storage::msc::media_present() {
-            State::Off
-        } else if errors::session_has_errors() {
-            State::Error
-        } else if is_writing || is_sending {
-            status::busy_now()
-        } else if !settled || (net::result() == net::NetResult::Pending && usb_ok) {
-            State::Booting
-        } else if usb_ok {
-            status::idle_now()
-        } else {
-            State::Booting
-        };
-
-        let activity: (bool, bool) = (is_writing, is_sending);
-        if activity != last_activity {
-            status::set_activity(is_writing, is_sending);
-            last_activity = activity;
-        }
-        if now != last {
-            log::info!(
-                "host {}, {} mount(s), {} sector(s) read",
-                storage::msc::host_state(),
-                storage::msc::mounts(),
-                storage::msc::reads_ok(),
-            );
-            status::set(now);
-            last = now;
-        }
-
         if !warned_no_host && waiting && usb_since.elapsed() >= HOST_GRACE {
             warned_no_host = true;
             if storage::msc::mounted() {
@@ -228,6 +198,34 @@ pub fn run() -> anyhow::Result<()> {
         if warned_no_host && !waiting {
             warned_no_host = false;
             warnings::set(WarningLabel::NoHost, false);
+        }
+
+        let now = if !storage::msc::media_present() {
+            State::Off
+        } else if errors::session_has_errors() {
+            State::Error
+        } else if is_writing || is_sending {
+            status::busy_now()
+        } else if !settled || (net::result() == net::NetResult::Pending && usb_ok) {
+            State::Booting
+        } else {
+            status::idle_now()
+        };
+
+        let activity: (bool, bool) = (is_writing, is_sending);
+        if activity != last_activity {
+            status::set_activity(is_writing, is_sending);
+            last_activity = activity;
+        }
+        if now != last {
+            log::info!(
+                "host {}, {} mount(s), {} sector(s) read",
+                storage::msc::host_state(),
+                storage::msc::mounts(),
+                storage::msc::reads_ok(),
+            );
+            status::set(now);
+            last = now;
         }
 
         if !reported_bad_read {
