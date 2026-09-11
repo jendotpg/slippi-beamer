@@ -1,3 +1,4 @@
+pub mod boot_animation;
 pub mod font;
 pub mod labels;
 pub mod lcd;
@@ -168,6 +169,7 @@ const BUSY_HALF_MS: u64 = 500; // ~1 Hz
 const DEBOUNCE_TICKS: u8 = 3; // 60 ms at TICK
 
 pub const SPINNER_STEPS: u64 = 12;
+const BOOT_MS_PER_FRAME: u64 = 100;
 
 fn led_bright(state: State, ms: u64) -> bool {
     match state {
@@ -182,6 +184,10 @@ fn led_bright(state: State, ms: u64) -> bool {
 
 fn spinner_frame(ms: u64) -> u64 {
     (ms % (BUSY_HALF_MS * 2)) * SPINNER_STEPS / (BUSY_HALF_MS * 2)
+}
+
+fn boot_frame(ms: u64) -> u64 {
+    (ms / BOOT_MS_PER_FRAME) % boot_animation::FRAME_COUNT as u64
 }
 
 struct Button<'d> {
@@ -330,12 +336,15 @@ fn render(pins: Pins) {
                 lcd.paint(state, &local);
                 last_frame = u64::MAX; // the animation owes a fresh frame
             }
-            let frame = spinner_frame(ms);
-            if frame != last_frame {
+            let frame = match state {
+                State::Booting => Some(boot_frame(ms)),
+                State::HealthyBusy | State::WarningBusy => Some(spinner_frame(ms)),
+                _ => None,
+            };
+            if let Some(frame) = frame.filter(|f| *f != last_frame) {
                 match state {
-                    State::Booting => lcd.boot_spinner(frame),
-                    State::HealthyBusy | State::WarningBusy => lcd.busy_spinner(frame),
-                    _ => {}
+                    State::Booting => lcd.boot_animation(frame),
+                    _ => lcd.busy_spinner(frame),
                 }
                 last_frame = frame;
             }

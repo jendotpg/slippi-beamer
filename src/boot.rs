@@ -165,6 +165,7 @@ pub fn run() -> anyhow::Result<()> {
     journal::mark(Phase::Running);
 
     let mut last = State::Booting;
+    let mut finished_booting = false;
     let mut last_activity = (false, false);
     let ready_since = std::time::Instant::now();
     let mut warned_no_host = false;
@@ -215,11 +216,17 @@ pub fn run() -> anyhow::Result<()> {
             State::Error
         } else if is_writing || is_sending {
             status::busy_now()
-        } else if !settled || (net::result() == net::NetResult::Pending && usb_ok && !ready) {
+        } else if !finished_booting
+            && (!settled || (net::result() == net::NetResult::Pending && usb_ok && !ready))
+        {
             State::Booting
         } else {
             status::idle_now()
         };
+
+        if now != State::Booting {
+            finished_booting = true;
+        }
 
         let activity: (bool, bool) = (is_writing, is_sending);
         if activity != last_activity {

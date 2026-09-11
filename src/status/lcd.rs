@@ -7,6 +7,7 @@ use esp_idf_svc::sys::{
 
 use crate::text::{self, ELLIPSIS};
 
+use super::boot_animation;
 use super::font;
 use super::{Detail, LcdPins, Net, State, SPINNER_STEPS};
 
@@ -64,7 +65,12 @@ const fn dim(level: u32) -> u16 {
     )
 }
 
-const SCRATCH_PX: usize = W as usize * 24;
+const BAND_PX: usize = W as usize * 24;
+const SCRATCH_PX: usize = if BAND_PX > boot_animation::PIXELS {
+    BAND_PX
+} else {
+    boot_animation::PIXELS
+};
 const SCRATCH_BYTES: usize = SCRATCH_PX * 2;
 
 #[repr(align(4))]
@@ -545,9 +551,15 @@ impl<'d> Lcd<'d> {
         self.blit(x0, y0, box_px, box_px);
     }
 
-    pub fn boot_spinner(&mut self, frame: u64) {
-        const BOX: u16 = 56;
-        self.spinner((W - BOX) / 2, (H - BOX) / 2, BOX, 22, 3, frame);
+    pub fn boot_animation(&mut self, frame: u64) {
+        let buf = unsafe { scratch() };
+        buf[..boot_animation::FRAME_BYTES].copy_from_slice(boot_animation::frame(frame as usize));
+        self.blit(
+            (W - boot_animation::WIDTH) / 2,
+            (H - boot_animation::HEIGHT) / 2,
+            boot_animation::WIDTH,
+            boot_animation::HEIGHT,
+        );
     }
 
     pub fn busy_spinner(&mut self, frame: u64) {

@@ -4,9 +4,7 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. add license
-2. boot animation
-3. rework errors/warnings: new rule is "errors require physical intervention" vs "warnings can be ignored/fixed ota". requires making errors recoverable (in particular, BAD WIFI)
+1. rework errors/warnings: new rule is "errors require physical intervention" vs "warnings can be ignored/fixed ota". requires making errors recoverable (in particular, BAD WIFI)
 
 ## Hardware
 
@@ -303,7 +301,7 @@ A warning icon will appear and the LED will go amber if something is wrong but i
 | `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.<br /><br />**Probably either a Slippi Nintendont software issue or Wii USB port hardware issue. <br />Ignore it once or twice - if it keeps coming up, try a different port.**                                                    |
 | `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.<br /><br />**Reset drive.**                                                                                                                                                                                                                     |
 | `WEAK LINK`     | The wifi signal is weak.<br /><br />**Move the router closer to this setup. <br />Sometimes ignorable - the more full your venue, the more worried you should be about this.**                                                                                                                                                        |
-| `WIFI ISSUE`    | The wifi won't connect. Shows fifteen seconds after boot. **Usually this just means you put the wrong WiFI password. Fix config.txt. If that wasn't the issue, move the router closer to this setup. The beamer antenna is not as strong as the ones in your phone and laptop!**                                                      |
+| `WIFI ISSUE`    | The wifi won't connect. Shows fifteen seconds after boot.** Usually this just means you put the wrong WiFI password. Fix config.txt. If that wasn't the issue, move the router closer to this setup. The beamer antenna is not as strong as the ones in your phone and laptop!**                                                      |
 | `WIFI TOO FULL` | The wifi connected but didn't issue an IP address - usually this means there are too many devices connected to the router.<br /><br />**Get your own router - see [choosing a router](#choosing-a-router). Sorry, the venue's router isn't cutting it for your tournament anymore. Tournament too big - good problems to have, huh?** |
 | `LOW MEMORY`    | Not enough heap to take another connection. Replays are refused with`503` until there's space.<br /><br />**Beamer is getting hammered pretty hard.<br />Ignore it once or twice - if it keeps happening, too many people are connecting to your beamer. Split into smaller sections.**                                               |
 
@@ -330,7 +328,7 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | `beamer_wbc.c` `s_staging`   |       8,192 | write back cache flush space                                                                                                                                                                             |
 | `beamer_msc.c` `s_ring`      |       8,192 | 512 transfer timings - used to track read / write time on SD cards                                                                                                                                       |
 | `beamer_log.c` `s_ring`      |       8,192 | the`esp_log` capture that becomes `LOGS/debug_N.txt`, 4,096 B of it kept per boot with the oldest lines dropped.<br /><br />because this is allocated at link time, `DEBUG=false` does not give it back. |
-| `lcd.rs` `SCRATCH`           |       7,680 | 160×24 band of the led panel                                                                                                                                                                             |
+| `lcd.rs` `SCRATCH`           |       8,192 | a 160×24 band of the led panel or a 64x64 boot animation frame                                                                                                                                           |
 | `http.rs` `SCRATCH`          |       6,144 | a 2 KB read chunk off the card and a 4 KB block of compressed output                                                                                                                                     |
 | `scan.rs` `seen` + `present` |       4,160 | `REPLAY-CAP` filename hashes and presence bitmap                                                                                                                                                         |
 | `http.rs` `BODY_BUF`         |       4,096 | `GET /status` or `GET /SLIPPI/` body                                                                                                                                                                     |
