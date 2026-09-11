@@ -169,9 +169,6 @@ const DEBOUNCE_TICKS: u8 = 3; // 60 ms at TICK
 
 pub const SPINNER_STEPS: u64 = 12;
 
-const DOTS_MS: u64 = 330;
-pub const DOTS_MAX: u64 = 3;
-
 fn led_bright(state: State, ms: u64) -> bool {
     match state {
         // Blinking means busy.
@@ -185,10 +182,6 @@ fn led_bright(state: State, ms: u64) -> bool {
 
 fn spinner_frame(ms: u64) -> u64 {
     (ms % (BUSY_HALF_MS * 2)) * SPINNER_STEPS / (BUSY_HALF_MS * 2)
-}
-
-fn dots_frame(ms: u64) -> u64 {
-    (ms / DOTS_MS) % DOTS_MAX + 1
 }
 
 struct Button<'d> {
@@ -337,22 +330,14 @@ fn render(pins: Pins) {
                 lcd.paint(state, &local);
                 last_frame = u64::MAX; // the animation owes a fresh frame
             }
-            match state {
-                State::Booting => {
-                    let frame = spinner_frame(ms);
-                    if frame != last_frame {
-                        lcd.spinner(frame);
-                        last_frame = frame;
-                    }
+            let frame = spinner_frame(ms);
+            if frame != last_frame {
+                match state {
+                    State::Booting => lcd.boot_spinner(frame),
+                    State::HealthyBusy | State::WarningBusy => lcd.busy_spinner(frame),
+                    _ => {}
                 }
-                State::HealthyBusy | State::WarningBusy => {
-                    let frame = dots_frame(ms);
-                    if frame != last_frame {
-                        lcd.dots(&local, frame);
-                        last_frame = frame;
-                    }
-                }
-                _ => {}
+                last_frame = frame;
             }
         }
 

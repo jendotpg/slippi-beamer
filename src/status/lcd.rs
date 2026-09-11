@@ -14,7 +14,7 @@ pub const W: u16 = 160;
 pub const H: u16 = 80;
 const X_GAP: u16 = 1;
 const Y_GAP: u16 = 26;
-const MADCTL: u8 = 0x60;
+const MADCTL: u8 = 0x68; // this setup is BGR, not RBG...
 const MADCTL_FLIPPED: u8 = MADCTL ^ 0xC0;
 const BACKLIGHT_ACTIVE_LOW: bool = true;
 const PCLK_HZ: u32 = 10_000_000; // deliberately slow - we barely animate...
@@ -303,28 +303,28 @@ impl<'d> Lcd<'d> {
         }
     }
 
-    fn text(&mut self, y: u16, scale: u16, s: &str, fg: u16, bg: u16) {
+    fn text(&mut self, x: u16, y: u16, w: u16, scale: u16, s: &str, fg: u16) {
         let h = font::H as u16 * scale;
-        if y >= H || h == 0 {
+        if y >= H || h == 0 || w == 0 {
             return;
         }
         let h = h.min(H - y);
-        let w = W as usize;
+        let width = w as usize;
 
         let buf = unsafe { scratch() };
-        paint(buf, w * h as usize, bg);
+        paint(buf, width * h as usize, BLACK);
 
         let chars = s.chars().count();
         let text_w = chars * font::ADVANCE * scale as usize;
         let text_w = text_w.saturating_sub(scale as usize);
-        let x0 = (w.saturating_sub(text_w)) / 2;
+        let x0 = (width.saturating_sub(text_w)) / 2;
 
         for (i, c) in s.chars().enumerate() {
             let gx = x0 + i * font::ADVANCE * scale as usize;
-            draw_glyph(buf, w, h as usize, gx, c, scale as usize, fg);
+            draw_glyph(buf, width, h as usize, gx, c, scale as usize, fg);
         }
 
-        self.blit(0, y, W, h);
+        self.blit(x, y, w, h);
     }
 
     pub fn paint(&mut self, state: State, d: &Detail) {
@@ -339,211 +339,194 @@ impl<'d> Lcd<'d> {
 
         match state {
             State::Booting => {}
-            State::HealthyIdle => self.idle(d),
-            State::WarningIdle => self.warning(d),
             State::Error => self.error(d),
-            State::HealthyBusy | State::WarningBusy => self.busy(d),
+            State::HealthyIdle | State::WarningIdle | State::HealthyBusy | State::WarningBusy => {
+                self.healthy(state, d)
+            }
             State::Off => unreachable!(),
         }
     }
 
-    const BUSY_Y: u16 = 8;
-    const BUSY_Y2: u16 = 26;
-
-    fn busy(&mut self, d: &Detail) {
-        self.dots(d, 1);
-
-        self.text(46, 1, "DO NOT UNPLUG", WHITE, BLACK);
-        self.name_line(64, d);
-    }
-
-    fn name_line(&mut self, y: u16, d: &Detail) {
-        if d.name.is_empty() {
-            return;
-        }
-        let mut rows = [""];
-        let fit = text::fit(&d.name, font::cols(W as usize, 1), &mut rows);
-        if fit.truncated {
-            let mut line = Line::new();
-            line.push(rows[0]).push(ELLIPSIS);
-            self.text(y, 1, line.as_str(), GREY, BLACK);
-        } else {
-            self.text(y, 1, rows[0], GREY, BLACK);
-        }
-    }
-
-    pub fn dots(&mut self, d: &Detail, frame: u64) {
-        let mut used = 0usize;
-        for (active, verb) in [(d.writing, "WRITING"), (d.sending, "SENDING")] {
-            if !active {
-                continue;
-            }
-            let mut line = Line::new();
-            line.push(verb);
-            for i in 0..super::DOTS_MAX {
-                line.push(if i < frame { "." } else { " " });
-            }
-            let y = if used == 0 {
-                Self::BUSY_Y
-            } else {
-                Self::BUSY_Y2
-            };
-            self.text(y, 2, line.as_str(), WHITE, BLACK);
-            used += 1;
-        }
-
-        if used == 0 {
-            self.text(Self::BUSY_Y, 2, " ", WHITE, BLACK);
-        }
-        if used <= 1 {
-            self.text(Self::BUSY_Y2, 2, " ", WHITE, BLACK);
-        }
-    }
-
-    fn idle(&mut self, d: &Detail) {
+    const NAME_W: u16 = 132;
+    const LOWER_X: u16 = 32;
+    const LOWER_W: u16 = W - 2 * Self::LOWER_X;
+    const LOWER_Y: u16 = 56;
+    const ICON_BOX: u16 = 28;
+    const ICON_Y: u16 = 46;
+    fn healthy(&mut self, state: State, d: &Detail) {
         let name = if d.name.is_empty() {
             "BEAMER"
         } else {
             d.name.as_str()
         };
 
+        self.text_upper(name, GREEN);
+        self.wifi(d.net);
+        if matches!(state, State::WarningIdle | State::WarningBusy) {
+            self.warning_icon();
+        }
+        self.text_inner_lower(state, d);
+    }
+
+    /// upper text longer than 22 characters is elided
+    fn text_upper(&mut self, s: &str, fg: u16) {
         let mut rows = ["", ""];
-        let big = font::cols(W as usize, 3);
-        let fit = text::fit(name, big, &mut rows[..1]);
+        let fit = text::fit(s, font::cols(Self::NAME_W as usize, 3), &mut rows[..1]);
         let (scale, fit) = if !fit.truncated && fit.used == 1 {
             (3u16, fit)
         } else {
-            (2u16, text::fit(name, font::cols(W as usize, 2), &mut rows))
+            (
+                2u16,
+                text::fit(s, font::cols(Self::NAME_W as usize, 2), &mut rows),
+            )
         };
 
-        let mut y = 8;
+        let step = font::H as u16 * scale + 2;
+        let block = step.saturating_mul(fit.used as u16).saturating_sub(2);
+        let mut y = (H / 2).saturating_sub(block) / 2;
         for (i, row) in rows[..fit.used].iter().enumerate() {
             let last = i + 1 == fit.used;
             if last && fit.truncated {
                 let mut line = Line::new();
                 line.push(row).push(ELLIPSIS);
-                self.text(y, scale, line.as_str(), GREEN, BLACK);
+                self.text(0, y, Self::NAME_W, scale, line.as_str(), fg);
             } else {
-                self.text(y, scale, row, GREEN, BLACK);
+                self.text(0, y, Self::NAME_W, scale, row, fg);
             }
-            y += font::H as u16 * scale + 2;
-        }
-
-        // `Net::Offline` and an unknown replay count render nothing at all.
-        // A station that has not looked yet must not claim it has no network.
-        match d.net {
-            Net::Offline => {}
-            Net::NotSet => self.text(52, 1, "no network", GREY, BLACK),
-            Net::Up(ip) => {
-                let mut line = Line::new();
-                let o = ip.octets();
-                line.push_num(o[0] as u32);
-                for b in &o[1..] {
-                    line.push(".").push_num(*b as u32);
-                }
-                self.text(52, 1, line.as_str(), GREY, BLACK);
-            }
-        }
-
-        if let Some((files, cap)) = d.files {
-            self.text(64, 1, Self::fill_line(files, cap).as_str(), GREY, BLACK);
+            y += step;
         }
     }
 
-    fn fill_line(files: u32, cap: u32) -> Line {
-        let pct = files
-            .saturating_mul(100)
-            .checked_div(cap)
-            .unwrap_or(0)
-            .min(100);
-
-        let mut long = Line::new();
-        long.push_num(files)
-            .push("/")
-            .push_num(cap)
-            .push(" replays (")
-            .push_num(pct)
-            .push("% full)");
-        if long.as_str().chars().count() <= font::cols(W as usize, 1) {
-            return long;
-        }
-
-        let mut short = Line::new();
-        short
-            .push_num(files)
-            .push("/")
-            .push_num(cap)
-            .push(" (")
-            .push_num(pct)
-            .push("% full)");
-        short
-    }
-
-    fn warning(&mut self, d: &Detail) {
-        let label = d.warn.map_or("WARNING", |w| w.as_str());
-        self.text(6, 2, label, AMBER, BLACK);
-
-        let reason = d.warn.map_or("", |w| w.reason());
-        let cols = font::cols(W as usize, 1);
-        let mut rows = ["", ""];
-        let fit = text::fit(reason, cols, &mut rows);
-        let mut y = 26;
-        for (i, row) in rows[..fit.used].iter().enumerate() {
-            if i + 1 == fit.used && fit.truncated {
-                let mut line = Line::new();
-                line.push(row).push(ELLIPSIS);
-                self.text(y, 1, line.as_str(), WHITE, BLACK);
-            } else {
-                self.text(y, 1, row, WHITE, BLACK);
-            }
-            y += font::H as u16 + 3;
-        }
-
-        if d.warn_more > 0 {
+    /// lines longer than 16 characters are elided
+    fn text_inner_lower(&mut self, state: State, d: &Detail) {
+        let cols = font::cols(Self::LOWER_W as usize, 1);
+        let fill;
+        let (s, fg) = if matches!(state, State::HealthyBusy | State::WarningBusy) {
+            ("DO NOT UNPLUG", WHITE)
+        } else if let Some(warn) = d.warn {
+            (warn.as_str(), AMBER)
+        } else if let Some((files, cap)) = d.files {
+            let pct = files
+                .saturating_mul(100)
+                .checked_div(cap)
+                .unwrap_or(0)
+                .min(100);
             let mut line = Line::new();
-            line.push("+").push_num(d.warn_more).push(" more");
-            self.text(54, 1, line.as_str(), GREY, BLACK);
+            line.push_num(pct).push("% full");
+            fill = line;
+            (fill.as_str(), GREY)
+        } else {
+            return;
+        };
+
+        let mut rows = [""];
+        let fit = text::fit(s, cols, &mut rows);
+        if fit.truncated {
+            let mut line = Line::new();
+            line.push(rows[0]).push(ELLIPSIS);
+            self.text(
+                Self::LOWER_X,
+                Self::LOWER_Y,
+                Self::LOWER_W,
+                1,
+                line.as_str(),
+                fg,
+            );
+        } else {
+            self.text(Self::LOWER_X, Self::LOWER_Y, Self::LOWER_W, 1, rows[0], fg);
         }
-        self.name_line(66, d);
+    }
+
+    fn wifi(&mut self, net: Net) {
+        const BOX_W: u16 = 28;
+        const BOX_H: u16 = 16;
+        const ICON_W: usize = 15;
+        let w = BOX_W as usize;
+        let h = BOX_H as usize;
+
+        let up = matches!(net, Net::Up(_));
+        let color = if up { GREEN } else { GREY };
+
+        let buf = unsafe { scratch() };
+        paint(buf, w * h, BLACK);
+        draw_bits(buf, w, h, (w - ICON_W) / 2, 2, &WIFI, color);
+        if !up {
+            for dx in -1..=1 {
+                line(buf, w, h, (4 + dx, 0), (23 + dx, 15), BLACK);
+            }
+            line(buf, w, h, (4, 0), (23, 15), RED);
+        }
+
+        self.blit(W - BOX_W, (H / 2 - BOX_H) / 2, BOX_W, BOX_H);
+    }
+
+    fn warning_icon(&mut self) {
+        const TOP: usize = 4;
+        const ROWS: usize = 19;
+        const HALF_BASE: usize = 11;
+        let box_px = Self::ICON_BOX as usize;
+        let cx = box_px / 2;
+
+        let buf = unsafe { scratch() };
+        paint(buf, box_px * box_px, BLACK);
+        for row in 0..ROWS {
+            let half = row * HALF_BASE / (ROWS - 1);
+            for x in cx - half..=cx + half {
+                put(buf, box_px, box_px, x, TOP + row, AMBER);
+            }
+        }
+        for y in TOP + 7..TOP + 13 {
+            put(buf, box_px, box_px, cx - 1, y, BLACK);
+            put(buf, box_px, box_px, cx, y, BLACK);
+        }
+        for y in TOP + 15..TOP + 17 {
+            put(buf, box_px, box_px, cx - 1, y, BLACK);
+            put(buf, box_px, box_px, cx, y, BLACK);
+        }
+
+        self.blit(2, Self::ICON_Y, Self::ICON_BOX, Self::ICON_BOX);
     }
 
     fn error(&mut self, d: &Detail) {
-        let label = d.label.map_or("ERROR", |l| l.as_str());
-        self.text(6, 2, label, RED, BLACK);
+        self.text_upper(d.label.map_or("ERROR", |l| l.as_str()), RED);
+        self.wifi(d.net);
+        self.text_full_lower(d);
+    }
 
-        let cols = font::cols(W as usize, 1);
-        let mut rows = ["", ""];
-        let fit = text::fit(&d.head, cols, &mut rows);
-        let mut y = 26;
+    /// lines longer than 26 characters are wrapped, over at most three rows
+    fn text_full_lower(&mut self, d: &Detail) {
+        const STEP: u16 = font::H as u16 + 3;
+
+        let mut rows = ["", "", ""];
+        let fit = text::fit(&d.head, font::cols(W as usize, 1), &mut rows);
+        let used = fit.used as u16 + u16::from(d.more > 0);
+
+        let block = STEP.saturating_mul(used).saturating_sub(3);
+        let mut y = H / 2 + (H / 2).saturating_sub(block) / 2;
         for (i, row) in rows[..fit.used].iter().enumerate() {
             if i + 1 == fit.used && fit.truncated {
                 let mut line = Line::new();
                 line.push(row).push(ELLIPSIS);
-                self.text(y, 1, line.as_str(), WHITE, BLACK);
+                self.text(0, y, W, 1, line.as_str(), WHITE);
             } else {
-                self.text(y, 1, row, WHITE, BLACK);
+                self.text(0, y, W, 1, row, WHITE);
             }
-            y += font::H as u16 + 3;
+            y += STEP;
         }
 
         if d.more > 0 {
             let mut line = Line::new();
             line.push("+").push_num(d.more).push(" more");
-            self.text(54, 1, line.as_str(), GREY, BLACK);
+            self.text(0, y, W, 1, line.as_str(), GREY);
         }
-        self.text(66, 1, "see LOGS/error.txt", GREY, BLACK);
     }
 
-    pub fn spinner(&mut self, frame: u64) {
-        const BOX: u16 = 56;
-        const R: i32 = 22;
-        const DOT: i32 = 3;
-        let x0 = (W - BOX) / 2;
-        let y0 = (H - BOX) / 2;
-        let c = BOX as i32 / 2;
+    fn spinner(&mut self, x0: u16, y0: u16, box_px: u16, r: i32, dot: i32, frame: u64) {
+        let w = box_px as usize;
+        let c = box_px as i32 / 2;
 
         let buf = unsafe { scratch() };
-        paint(buf, BOX as usize * BOX as usize, BLACK);
+        paint(buf, w * w, BLACK);
 
         for i in 0..SPINNER_STEPS {
             let behind = (SPINNER_STEPS + frame - i) % SPINNER_STEPS;
@@ -554,12 +537,22 @@ impl<'d> Lcd<'d> {
                 3 => dim(60),
                 _ => dim(20),
             };
-            let cx = c + COS[i as usize] as i32 * R / 64;
-            let cy = c + SIN[i as usize] as i32 * R / 64;
-            disc(buf, BOX as usize, BOX as usize, cx, cy, DOT, color);
+            let cx = c + COS[i as usize] as i32 * r / 64;
+            let cy = c + SIN[i as usize] as i32 * r / 64;
+            disc(buf, w, w, cx, cy, dot, color);
         }
 
-        self.blit(x0, y0, BOX, BOX);
+        self.blit(x0, y0, box_px, box_px);
+    }
+
+    pub fn boot_spinner(&mut self, frame: u64) {
+        const BOX: u16 = 56;
+        self.spinner((W - BOX) / 2, (H - BOX) / 2, BOX, 22, 3, frame);
+    }
+
+    pub fn busy_spinner(&mut self, frame: u64) {
+        let box_px = Self::ICON_BOX;
+        self.spinner(W - box_px - 2, Self::ICON_Y, box_px, 10, 2, frame);
     }
 
     pub fn set_flipped(&mut self, flipped: bool) {
@@ -627,6 +620,28 @@ fn draw_glyph(buf: &mut [u8], w: usize, h: usize, x: usize, c: char, scale: usiz
     }
 }
 
+fn draw_bits(buf: &mut [u8], w: usize, h: usize, x: usize, y: usize, rows: &[u16], color: u16) {
+    for (row, bits) in rows.iter().enumerate() {
+        for col in 0..u16::BITS as usize {
+            if bits >> col & 1 == 1 {
+                put(buf, w, h, x + col, y + row, color);
+            }
+        }
+    }
+}
+
+fn line(buf: &mut [u8], w: usize, h: usize, from: (i32, i32), to: (i32, i32), color: u16) {
+    let ((x0, y0), (x1, y1)) = (from, to);
+    let steps = (x1 - x0).abs().max((y1 - y0).abs()).max(1);
+    for i in 0..=steps {
+        let x = x0 + (x1 - x0) * i / steps;
+        let y = y0 + (y1 - y0) * i / steps;
+        if x >= 0 && y >= 0 {
+            put(buf, w, h, x as usize, y as usize, color);
+        }
+    }
+}
+
 fn disc(buf: &mut [u8], w: usize, h: usize, cx: i32, cy: i32, r: i32, color: u16) {
     for y in -r..=r {
         for x in -r..=r {
@@ -636,6 +651,22 @@ fn disc(buf: &mut [u8], w: usize, h: usize, cx: i32, cy: i32, r: i32, color: u16
         }
     }
 }
+
+// 15x11, the arcs top to bottom and then the dot.
+#[rustfmt::skip]
+const WIFI: [u16; 11] = [
+    0x07F0, // ....#######....
+    0x180C, // ..##.......##..
+    0x2002, // .#...........#.
+    0x03E0, // .....#####.....
+    0x0C18, // ...##.....##...
+    0x0000, // ...............
+    0x01C0, // ......###......
+    0x0220, // .....#...#.....
+    0x0000, // ...............
+    0x01C0, // ......###......
+    0x01C0, // ......###......
+];
 
 //throwback,,,
 const COS: [i16; 12] = [64, 55, 32, 0, -32, -55, -64, -55, -32, 0, 32, 55];

@@ -4,12 +4,9 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. redesign screen:
-   1. always show station name (unless error or booting)
-   2. icon in the top-right for when there's an error state
-   3. icon in the bottom-right for when there's a busy state
-
-2. get replay-manager-for-slippi fork caught up!
+1. add license
+2. boot animation
+3. rework errors/warnings: new rule is "errors require physical intervention" vs "warnings can be ignored/fixed ota". requires making errors recoverable (in particular, BAD WIFI)
 
 ## Hardware
 
@@ -277,14 +274,7 @@ cargo run --release
 
 **Blinking means something is happening - DO NOT UNPLUG.**
 
-| Screen                                                         | LED Pattern                       | Meaning                                                        | Safe to Unplug? |
-| -------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------- | --------------- |
-| Loading circle                                                 | Blinking (**green**)              | Booting.                                                       | no              |
-| Station name                                                   | Solid (**green**)                 | Healthy and idle.                                              | yes             |
-| Warning label                                                  | Solid (**amber**)                 | Warning and idle.                                              | yes             |
-| `WRITING` or `SENDING`, with moving dots, over `DO NOT UNPLUG` | Blinking (**green** or **amber**) | Doing something - don't unplug. If amber, there's a warning :P | no              |
-| Error label                                                    | Solid (**red**)                   | Unhealthy.                                                     | yes             |
-| Dark, backlight off                                            | Solid (**red** or **off**)        | Stopped.                                                       | yes             |
+A warning icon will appear and the LED will go amber if something is wrong but it's recoverable or ignorable (drive needs to be reset, wifi is a little too weak for safety, etc). If something is wrong but it's not recoverable (SD card misformatted, wrong wifi, etc) the LED will go red and the whole screen will show an error instead.
 
 ### Error labels
 
