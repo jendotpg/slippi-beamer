@@ -9,8 +9,7 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
    2. icon in the top-right for when there's an error state
    3. icon in the bottom-right for when there's a busy state
 
-2. remove debug/zeros (its a nightmare and we already know what we wanted from it)
-3. get replay-manager-for-slippi fork caught up!
+2. get replay-manager-for-slippi fork caught up!
 
 ## Hardware
 

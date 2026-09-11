@@ -128,10 +128,6 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
             respond_json(req, 200, last_transfer_json().as_bytes())
         })?;
 
-        #[allow(clippy::redundant_closure)]
-        server
-            .fn_handler::<anyhow::Error, _>("/debug/zeros", Method::Get, |req| send_zeros(req))?;
-
         server.fn_handler::<anyhow::Error, _>("/debug/heap", Method::Get, |req| {
             let (free, largest) = crate::journal::heap_now();
             let low = crate::journal::heap_low();
@@ -166,7 +162,7 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
             respond_json(req, 200, body.as_bytes())
         })?;
 
-        log::info!("debug endpoints on: /debug/transfer /debug/zeros /debug/heap");
+        log::info!("debug endpoints on: /debug/transfer /debug/heap");
     }
 
     let card = sd;
@@ -247,22 +243,6 @@ pub(super) fn parse_range(header: Option<&str>) -> RangeReq {
     }
 }
 
-fn query_num(uri: &str, key: &str, default: usize, max: usize) -> usize {
-    let Some(query) = uri.split('?').nth(1) else {
-        return default;
-    };
-    for pair in query.split('&') {
-        let mut kv = pair.splitn(2, '=');
-        if kv.next() == Some(key) {
-            return match kv.next().and_then(|v| v.parse::<usize>().ok()) {
-                Some(n) => n.clamp(1, max),
-                None => default,
-            };
-        }
-    }
-    default
-}
-
 fn last_transfer_json() -> String {
     let guard = LAST.lock().unwrap_or_else(|e| e.into_inner());
     let Some(s) = *guard else {
@@ -288,67 +268,6 @@ fn last_transfer_json() -> String {
         s.sd_wait_us,
         s.sd_wait_max_us
     )
-}
-
-fn send_zeros<C>(req: esp_idf_svc::http::server::Request<C>) -> anyhow::Result<()>
-where
-    C: esp_idf_svc::http::server::Connection,
-    C::Error: std::error::Error + Send + Sync + 'static,
-{
-    const MAX_N: usize = 64 * 1024 * 1024;
-    const MAX_CHUNK: usize = 64 * 1024;
-
-    let n = query_num(req.uri(), "n", 4 * 1024 * 1024, MAX_N);
-    let want = query_num(req.uri(), "chunk", CHUNK, MAX_CHUNK);
-
-    let shared = SCRATCH.try_lock().ok();
-    let mut scratch: Vec<u8> = Vec::new();
-    let big = want > CHUNK && scratch.try_reserve_exact(want).is_ok();
-    if !big && shared.is_none() {
-        return respond_json(req, 503, ERR_SERVING);
-    }
-
-    let mut resp = req.into_response(
-        200,
-        None,
-        &[
-            ("Content-Type", "application/octet-stream"),
-            ("Cache-Control", "no-store"),
-        ],
-    )?;
-
-    let t0 = now_us();
-    let mut sent = 0usize;
-    let mut chunks = 0u32;
-
-    if big {
-        scratch.resize(want, 0);
-        while sent < n {
-            let k = want.min(n - sent);
-            resp.write_all(&scratch[..k])?;
-            sent += k;
-            chunks += 1;
-        }
-    } else {
-        let mut guard = shared.expect("checked above");
-        let buf = &mut guard.read;
-        buf.fill(0);
-        let step = want.min(CHUNK);
-        while sent < n {
-            let k = step.min(n - sent);
-            resp.write_all(&buf[..k])?;
-            sent += k;
-            chunks += 1;
-        }
-    }
-    resp.flush()?;
-
-    let took = (now_us() - t0) as u32;
-    log::info!(
-        "zeros: {sent} B in {took} us, {chunks} chunk(s) of {}",
-        if big { want } else { want.min(CHUNK) }
-    );
-    Ok(())
 }
 
 pub(super) const ERR_NOT_FOUND: &[u8] =
