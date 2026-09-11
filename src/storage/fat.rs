@@ -1,5 +1,3 @@
-//! FatFs views of the card: one read-write, one read-only.
-
 use std::ffi::CString;
 use std::sync::{Mutex, MutexGuard};
 
@@ -148,18 +146,24 @@ pub struct OpenTiming {
 }
 
 impl ReadWindow {
-    pub fn open_measured(sd: &SdCard) -> Result<(ReadWindow, OpenTiming), EspError> {
+    pub fn try_open_measured(sd: &SdCard) -> Result<Option<(ReadWindow, OpenTiming)>, EspError> {
         let _ = sd;
         let t0 = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
-        let guard = RO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = match RO_LOCK.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+        };
         let t1 = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
         let window = ReadWindow::mount_locked(guard)?;
         let t2 = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
-        let timing = OpenTiming {
-            lock_us: (t1 - t0) as u32,
-            mount_us: (t2 - t1) as u32,
-        };
-        Ok((window, timing))
+        Ok(Some((
+            window,
+            OpenTiming {
+                lock_us: (t1 - t0) as u32,
+                mount_us: (t2 - t1) as u32,
+            },
+        )))
     }
 
     pub fn try_open(sd: &SdCard) -> Result<Option<ReadWindow>, EspError> {

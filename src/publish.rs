@@ -63,6 +63,10 @@ impl PublishedSet {
         self.entries.iter().any(|e| e.name == name)
     }
 
+    pub fn size_of(&self, name: &str) -> Option<u64> {
+        self.entries.iter().find(|e| e.name == name).map(|e| e.size)
+    }
+
     pub fn index_str(&self) -> &str {
         self.index_buf.as_str()
     }

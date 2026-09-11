@@ -134,6 +134,7 @@ pub fn status_json(
     link: Option<LinkInfo>,
     fast: &Fast,
     replay_cap: u32,
+    serving: u32,
     now_s: u64,
     has_errors: bool,
     warnings: &[&str],
@@ -172,6 +173,7 @@ pub fn status_json(
 
     let _ = writeln!(s, "  \"replay_count\": {},", fast.replay_count);
     let _ = writeln!(s, "  \"replay_cap\": {replay_cap},");
+    let _ = writeln!(s, "  \"serving\": {serving},");
     s.push_str("  \"ssh\": false,\n"); // always false - esp32 beamers have no ssh!
 
     match &fast.game {

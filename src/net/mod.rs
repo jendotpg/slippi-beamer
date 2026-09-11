@@ -2,6 +2,7 @@ pub mod check;
 pub mod gz;
 pub mod http;
 pub mod mdns;
+mod transfer;
 pub mod wifi;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
@@ -76,9 +77,19 @@ const SEGMENT: u32 = (16 + 56 + CONFIG_LWIP_TCP_MSS + 4) + (16 + 4);
 pub const CONN_HEAP: u32 = (CONFIG_LWIP_TCP_SND_BUF_DEFAULT / CONFIG_LWIP_TCP_MSS) * SEGMENT;
 pub const HEAP_FLOOR: u32 = CONFIG_LWIP_MAX_ACTIVE_TCP * CONN_HEAP + 8 * 1024;
 
-pub fn heap_too_low() -> Option<u32> {
-    let (free, _) = crate::journal::heap_now();
-    (free < HEAP_FLOOR).then_some(free)
+pub const BLOCK_FLOOR: u32 = 3 * SEGMENT;
+
+pub enum HeapShort {
+    Free(u32),
+    Fragmented(u32),
+}
+
+pub fn heap_too_low() -> Option<HeapShort> {
+    let (free, largest) = crate::journal::heap_now();
+    if free < HEAP_FLOOR {
+        return Some(HeapShort::Free(free));
+    }
+    (largest < BLOCK_FLOOR).then_some(HeapShort::Fragmented(largest))
 }
 
 pub fn oom_count() -> u32 {
@@ -210,8 +221,21 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         }
     };
 
-    let server = match http::serve(sd) {
-        Ok(s) => Some(s),
+    let mut transfer_handle = None;
+    let server = match http::serve(sd.clone()) {
+        Ok(s) => {
+            match transfer::spawn(sd.clone()).and_then(|h| {
+                transfer::register(&s)?;
+                Ok(h)
+            }) {
+                Ok(h) => transfer_handle = Some(h),
+                Err(e) => fail(
+                    crate::status::ErrorLabel::NoHttp,
+                    &["replays cannot be served", &format!("{e}")],
+                ),
+            }
+            Some(s)
+        }
         Err(e) => {
             fail(
                 crate::status::ErrorLabel::NoHttp,
@@ -319,13 +343,14 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         }
     };
 
-    stand_down(server, mdns, radio, ejected);
+    stand_down(server, transfer_handle, mdns, radio, ejected);
 }
 
 const RED_POLL: Duration = Duration::from_millis(250);
 
 fn stand_down(
     server: Option<esp_idf_svc::http::server::EspHttpServer<'static>>,
+    transfer_handle: Option<std::thread::JoinHandle<()>>,
     mdns: Option<esp_idf_svc::mdns::EspMdns>,
     radio: wifi::Radio,
     ejected: bool,
@@ -336,6 +361,7 @@ fn stand_down(
         log::warn!("station is red: standing down -- no HTTP, no discovery");
     }
 
+    transfer::shutdown(transfer_handle);
     drop(server);
     drop(mdns);
     drop(radio);

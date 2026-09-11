@@ -148,6 +148,9 @@ extern "C"
     void beamer_oom_watch(void);
     uint32_t beamer_oom_count(void);
     uint32_t beamer_oom_largest(void);
+    uint32_t beamer_oom_last_size(void);
+    uint32_t beamer_oom_last_caps(void);
+    const char *beamer_oom_last_fn(void);
 
 #ifdef __cplusplus
 }

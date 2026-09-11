@@ -141,32 +141,60 @@ fn wipe_inner(sd: &super::SdCard) -> Result<u32, String> {
     outcome
 }
 
+const BATCH: usize = 8;
+const NAME_MAX: usize = 256;
+
+static WIPE_BATCH: std::sync::Mutex<[heapless::String<NAME_MAX>; BATCH]> =
+    std::sync::Mutex::new([const { heapless::String::new() }; BATCH]);
+
 fn unlink_replays() -> u32 {
     let dir = format!("{}/SLIPPI", crate::storage::fat::BASE_PATH);
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(e) => {
-            log::warn!("reset: could not open SLIPPI/: {e}");
-            return 0;
-        }
-    };
+    let mut batch = WIPE_BATCH.lock().unwrap_or_else(|e| e.into_inner());
+    let mut n = 0;
 
-    let mut names = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        if let Some(name) = name.to_str() {
-            if crate::publish::is_replay_name(name) {
-                names.push(name.to_owned());
+    loop {
+        let mut found = 0;
+        match std::fs::read_dir(&dir) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let Some(name) = name.to_str() else { continue };
+                    if !crate::publish::is_replay_name(name) {
+                        continue;
+                    }
+                    batch[found].clear();
+                    if batch[found].push_str(name).is_err() {
+                        log::warn!("reset: skipping {name}: name too long");
+                        continue;
+                    }
+                    found += 1;
+                    if found == BATCH {
+                        break;
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("reset: could not open SLIPPI/: {e}");
+                return n;
             }
         }
-    }
 
-    let mut n = 0;
-    for name in names {
-        match std::fs::remove_file(format!("{dir}/{name}")) {
-            Ok(()) => n += 1,
-            Err(e) => log::warn!("reset: could not remove {name}: {e}"),
+        if found == 0 {
+            return n;
+        }
+
+        let mut removed = 0;
+        for name in batch.iter().take(found) {
+            match std::fs::remove_file(format!("{dir}/{name}")) {
+                Ok(()) => {
+                    n += 1;
+                    removed += 1;
+                }
+                Err(e) => log::warn!("reset: could not remove {name}: {e}"),
+            }
+        }
+        if removed == 0 {
+            return n;
         }
     }
-    n
 }

@@ -4,21 +4,17 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. update tcp priorities
-   1. always respond to mDNS requests first and foremost
-   2. 503 when busy instead of not responding?
-
-2. make "DRIVE FAILING", "WIFI ISSUE", "WIFI TOO FULL" errors instead of a warning
+1. make "DRIVE FAILING", "WIFI ISSUE", "WIFI TOO FULL" errors instead of a warning
    1. a warning is either fixable OTA or usually ignorable. these three require physical intervention - they should be errors!
 
-3. fix "NO WII" not working right
-4. redesign screen:
+2. fix "NO WII" not working right
+3. redesign screen:
    1. always show station name (unless error or booting)
    2. icon in the top-right for when there's an error state
    3. icon in the bottom-right for when there's a busy state
 
-5. remove debug/zeros (its a nightmare and we already know what we wanted from it)
-6. get replay-manager-for-slippi fork caught up!
+4. remove debug/zeros (its a nightmare and we already know what we wanted from it)
+5. get replay-manager-for-slippi fork caught up!
 
 ## Hardware
 
@@ -173,6 +169,7 @@ Everything here is cached by the scan tick so this `GET` is very cheap - **it's 
   "channel": 6,
   "replay_count": 47, # how many replays are stored - NOT how many are being served!
   "replay_cap": 512,
+  "serving": 0, # replays in flight - always 0 or 1
   "ssh": false, # always false
   "game": {
     "live": false, # whether this game is still in progress
@@ -239,6 +236,8 @@ A few notes:
 `GET /` returns `403`. This is expected and intentional.
 
 Posts can be refused with `409` - this is expected, handle it smoothly in application code. The beamer won't reset the drive while a game is live, so backoffs for that endpoint should be LONG.
+
+Sometimes an transfer will come back `503` - this usually means another application is already pulling from the beamer. Sometimes it's because of memory pressure for some other reason.
 
 ## Testing without a station
 
@@ -334,7 +333,7 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 
 ### Memory
 
-**Dynamic allocation follows a strict rule: never allocate a block larger than 512B once the station is `Running` unless the station can stay fully operational if that allocation fails.** Prefer moving large allocations off the heap wherever possible. In Rust, this usually means `static` or `heapless` - in C it usually means a file-scope `static`. Exceptions can be made in debug mode(`journal`'s log tail is currently the only one).
+**Dynamic allocation follows a strict rule: never allocate a block larger than 512B once the station is `Running` unless the station can stay fully operational if that allocation fails.** Prefer moving large allocations off the heap wherever possible. In Rust, this usually means `static` or `heapless` - in C it usually means a file-scope `static`. Exceptions can be made in debug mode(`journal`'s log tail is one).
 
 #### Allocated statically at link time
 
@@ -359,6 +358,7 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | `beamer_msc.c` `s_stack`     |       6,144 | `beamer_msc` task stack                                                                                                                                                                                  |
 | `beamer_wbc.c` `s_stack`     |       4,096 | `beamer_wbc` flush task stack                                                                                                                                                                            |
 | `beamer_wbc.c` `s_meta`      |         768 | 64 slot descriptors                                                                                                                                                                                      |
+| `volume.rs` `WIPE_BATCH`     |       2,048 | 8 replay names for`POST /reset-beamer`, so the wipe does not build a list of every replay on the heap                                                                                                    |
 | everything else              |       4,029 |                                                                                                                                                                                                          |
 | **Total**                    | **167 KiB** |                                                                                                                                                                                                          |
 
@@ -367,7 +367,7 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | Consumer                                                                                                                                                                        |        Bytes |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -----------: |
 | ESP-IDF's tasks (main 8,704, TCP/IP 3,584, esp_timer 4,096, event 2,816, IPC ×2 2,560, idle ×2 3,072, FreeRTOS timer 2,048, WiFi ~3,584, mDNS 4,096, httpd 8,192) plus ~13 TCBs |      ~53,000 |
-| Firmware tasks: journal log 4,096, scan 8,192, net 8,192, status 4,096. The journal drain's 8,192 joins them only when`DEBUG` is set                                            |       24,576 |
+| Firmware tasks: journal log 4,096, scan 8,192, net 8,192, status 4,096, transfer 6,144. The journal drain's 8,192 joins them only when`DEBUG` is set                            |       30,720 |
 | WiFi (minus the`.bss` portion)                                                                                                                                                  |       21,950 |
 | httpd's lwIP pools and loopback control socket                                                                                                                                  |        5,508 |
 | mDNS (minus the`.bss` portion)                                                                                                                                                  |        1,932 |
@@ -375,15 +375,17 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | The read window's FatFs registration                                                                                                                                            |        2,220 |
 | The rendered reset census, two short lines held for the boot                                                                                                                    |         ~250 |
 | Journal drain task (only when`DEBUG=true`)                                                                                                                                      |        8,192 |
-| **Total**                                                                                                                                                                       | **~118 KiB** |
+| **Total**                                                                                                                                                                       | **~124 KiB** |
 
 #### Allocated by lwIP
 
-| Consumer                                     |      Bytes |                                                                          |
-| -------------------------------------------- | ---------: | ------------------------------------------------------------------------ |
-| One queued TCP segment                       |      1,536 | a`pbuf` of 16+56+1440 and a `tcp_seg` of 16, each +4 for TLSF            |
-| One connection's send queue,`SND_BUF` 11,520 |     12,288 | 8 segments;`LWIP_NETIF_TX_SINGLE_PBUF` rounds every one up to a full MSS |
-| **Both sockets,`max_open_sockets` = 2**      | **24,576** | what serving actually costs, since replay bytes fill every segment       |
+| Consumer                                       |      Bytes |                                                                          |
+| ---------------------------------------------- | ---------: | ------------------------------------------------------------------------ |
+| One queued TCP segment                         |      1,536 | a`pbuf` of 16+56+1440 and a `tcp_seg` of 16, each +4 for TLSF            |
+| One connection's send queue,`SND_BUF` 8,640    |      9,216 | 6 segments;`LWIP_NETIF_TX_SINGLE_PBUF` rounds every one up to a full MSS |
+| **Both sockets,`max_open_sockets` = 2**        | **18,432** | what serving actually costs, since replay bytes fill every segment       |
+| The WiFi driver's copy of each of those frames |     19,560 | ~1,630 B per frame,`MALLOC_CAP_INTERNAL\|DMA\|8BIT`, taken on demand     |
+| **Peak in flight**                             | **37,992** | every byte in flight is buffered twice, once each side of the driver     |
 
 #### Summary
 
@@ -394,11 +396,11 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | ...IRAM, the firmware's own code      |     94 KiB |
 | ...allocated statically at link time  |    167 KiB |
 | ...left for the heap                  |    171 KiB |
-| Allocated once at boot,`DEBUG=false`  |   ~110 KiB |
-| ...`DEBUG=true`                       |   ~118 KiB |
+| Allocated once at boot,`DEBUG=false`  |   ~116 KiB |
+| ...`DEBUG=true`                       |   ~124 KiB |
 | Allocated by lwIP while serving       |  12-24 KiB |
-| Free heap at rest                     | ~50-60 KiB |
-| Free heap while serving               | ~25-50 KiB |
+| Free heap at rest                     | ~45-46 KiB |
+| Free heap while serving               | ~25-45 KiB |
 | Largest free block at rest            |    ~31 KiB |
 | Largest free block while serving      |   ~7.5 KiB |
 
@@ -427,6 +429,7 @@ I really make an effort to keep this table up to date - it's not trivially self 
 | `beamer_msc`                | 22                     | 1    | `components/beamer_msc/beamer_msc.c` |
 | `beamer_wbc`                | 10                     | 1    | `components/beamer_msc/beamer_wbc.c` |
 | `httpd` (`esp_http_server`) | 5                      | 0    | `src/net/http.rs`                    |
+| `transfer`                  | 4                      | 0    | `src/net/transfer.rs`                |
 | `net`                       | 4                      | 0    | `src/net/mod.rs`                     |
 | `scan`                      | 4                      | 0    | `src/scan.rs`                        |
 | `status`                    | 3                      | 0    | `src/status/mod.rs`                  |

@@ -1,5 +1,3 @@
-use std::io::Read as _;
-use std::io::{Seek as _, SeekFrom};
 use std::sync::{Arc, Mutex};
 
 use esp_idf_svc::hal::cpu::Core;
@@ -11,10 +9,7 @@ use crate::errors;
 use crate::publish::is_replay_name;
 use crate::report;
 use crate::scan;
-use crate::storage::fat::ReadWindow;
 use crate::storage::{volume, SdCard};
-
-use super::gz;
 
 static API_LOCK: Mutex<()> = Mutex::new(());
 
@@ -22,40 +17,40 @@ const CHUNK: usize = 2 * 1024;
 const GZ_OUT: usize = 4 * 1024;
 
 #[repr(align(64))]
-struct Scratch {
-    read: [u8; CHUNK],
-    out: [u8; GZ_OUT],
+pub(super) struct Scratch {
+    pub(super) read: [u8; CHUNK],
+    pub(super) out: [u8; GZ_OUT],
 }
 
-static SCRATCH: Mutex<Scratch> = Mutex::new(Scratch {
+pub(super) static SCRATCH: Mutex<Scratch> = Mutex::new(Scratch {
     read: [0; CHUNK],
     out: [0; GZ_OUT],
 });
 
 #[derive(Debug, Clone, Copy, Default)]
-struct TransferStats {
-    bytes: u64,
-    sent_bytes: u64,
-    chunks: u32,
-    gzip: bool,
-    level: i32,
-    deflate_us: u32,
-    deflate_max_us: u32,
-    stack_left: u32,
-    read_us: u32,
-    read_max_us: u32,
-    write_us: u32,
-    write_max_us: u32,
-    lock_us: u32,
-    mount_us: u32,
-    sd_wait_us: u32,
-    sd_wait_max_us: u32,
-    total_us: u32,
+pub(super) struct TransferStats {
+    pub(super) bytes: u64,
+    pub(super) sent_bytes: u64,
+    pub(super) chunks: u32,
+    pub(super) gzip: bool,
+    pub(super) level: i32,
+    pub(super) deflate_us: u32,
+    pub(super) deflate_max_us: u32,
+    pub(super) stack_left: u32,
+    pub(super) read_us: u32,
+    pub(super) read_max_us: u32,
+    pub(super) write_us: u32,
+    pub(super) write_max_us: u32,
+    pub(super) lock_us: u32,
+    pub(super) mount_us: u32,
+    pub(super) sd_wait_us: u32,
+    pub(super) sd_wait_max_us: u32,
+    pub(super) total_us: u32,
 }
 
 static LAST: Mutex<Option<TransferStats>> = Mutex::new(None);
 
-fn publish_stats(s: TransferStats) {
+pub(super) fn publish_stats(s: TransferStats) {
     *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some(s);
     let coding = if s.gzip {
         format!(
@@ -90,11 +85,10 @@ pub(super) fn now_us() -> i64 {
     unsafe { esp_idf_svc::sys::esp_timer_get_time() }
 }
 
-fn debug_enabled() -> bool {
+pub(super) fn debug_enabled() -> bool {
     crate::journal::enabled() // DEBUG and the journal being enabled are the same :3
 }
 
-const SLIPPI_PREFIX_GLOB: &str = "/SLIPPI/*";
 const SLIPPI_PREFIX: &str = "/SLIPPI/";
 
 pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
@@ -104,7 +98,7 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
         stack_size: 8192, // determined experimentally - lower panics...
         uri_match_wildcard: true,
         max_open_sockets: 2,
-        lru_purge_enable: false,
+        lru_purge_enable: true,
         ..Default::default()
     })?;
 
@@ -143,9 +137,31 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
             let low = crate::journal::heap_low();
             let oom = unsafe { esp_idf_svc::sys::beamer_oom_count() };
             let oom_largest = unsafe { esp_idf_svc::sys::beamer_oom_largest() };
+            let (oom_caps, oom_fn) = unsafe {
+                let f = esp_idf_svc::sys::beamer_oom_last_fn();
+                (
+                    esp_idf_svc::sys::beamer_oom_last_caps(),
+                    if f.is_null() {
+                        String::new()
+                    } else {
+                        std::ffi::CStr::from_ptr(f).to_string_lossy().into_owned()
+                    },
+                )
+            };
             let (conn, floor) = (super::CONN_HEAP, super::HEAP_FLOOR);
+            let (dma_free, dma_largest) = unsafe {
+                use esp_idf_svc::sys::{
+                    heap_caps_get_free_size, heap_caps_get_largest_free_block, MALLOC_CAP_DMA,
+                };
+                (
+                    heap_caps_get_free_size(MALLOC_CAP_DMA) as u32,
+                    heap_caps_get_largest_free_block(MALLOC_CAP_DMA) as u32,
+                )
+            };
+            let httpd_stack =
+                unsafe { esp_idf_svc::sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut()) };
             let body = format!(
-                r#"{{"free": {free}, "largest_block": {largest}, "low_water": {low}, "oom_count": {oom}, "oom_largest": {oom_largest}, "conn_heap": {conn}, "heap_floor": {floor}}}"#
+                r#"{{"free": {free}, "largest_block": {largest}, "low_water": {low}, "oom_count": {oom}, "oom_largest": {oom_largest}, "conn_heap": {conn}, "heap_floor": {floor}, "httpd_stack_left": {httpd_stack}, "dma_free": {dma_free}, "dma_largest": {dma_largest}, "oom_caps": "{oom_caps:#x}", "oom_fn": "{oom_fn}"}}"#
             );
             respond_json(req, 200, body.as_bytes())
         })?;
@@ -184,43 +200,28 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
         }
     })?;
 
-    server.fn_handler::<anyhow::Error, _>(SLIPPI_PREFIX_GLOB, Method::Get, move |req| {
-        let Some(name) = replay_name(req.uri()) else {
-            log::warn!("refused {:?}: not a replay name", req.uri());
-            return respond(req, 404, b"not found\n");
-        };
-
-        if !scan::is_published(name) {
-            log::info!("refused {name}: not published");
-            return respond(req, 404, b"not found\n");
-        }
-
-        let name = name.to_owned();
-        send_replay(req, &card, &name)
-    })?;
-
     log::info!("http listening on :80");
     Ok(server)
 }
 
-fn replay_name(uri: &str) -> Option<&str> {
+pub(super) fn replay_name(uri: &str) -> Option<&str> {
     let path = uri.split('?').next().unwrap_or(uri);
     let name = path.strip_prefix(SLIPPI_PREFIX)?;
     is_replay_name(name).then_some(name)
 }
 
-enum RangeReq {
+pub(super) enum RangeReq {
     None,
     From(u64),
     Bad,
 }
-enum Resume {
+pub(super) enum Resume {
     None,
     At(u64),
     Bad,
 }
 
-fn parse_from(header: Option<&str>) -> Resume {
+pub(super) fn parse_from(header: Option<&str>) -> Resume {
     let Some(raw) = header else {
         return Resume::None;
     };
@@ -230,7 +231,7 @@ fn parse_from(header: Option<&str>) -> Resume {
     }
 }
 
-fn parse_range(header: Option<&str>) -> RangeReq {
+pub(super) fn parse_range(header: Option<&str>) -> RangeReq {
     let Some(raw) = header else {
         return RangeReq::None;
     };
@@ -244,215 +245,6 @@ fn parse_range(header: Option<&str>) -> RangeReq {
         Ok(n) => RangeReq::From(n),
         Err(_) => RangeReq::Bad,
     }
-}
-
-fn send_replay<C>(
-    req: esp_idf_svc::http::server::Request<C>,
-    sd: &SdCard,
-    name: &str,
-) -> anyhow::Result<()>
-where
-    C: esp_idf_svc::http::server::Connection,
-    C::Error: std::error::Error + Send + Sync + 'static,
-{
-    if let Some(free) = super::heap_too_low() {
-        log::error!(
-            "refusing {name}: {free} B free is under the {} B floor for {} more connection(s)",
-            super::HEAP_FLOOR,
-            1
-        );
-        return respond(req, 503, b"station is low on memory\n");
-    }
-
-    let _transfer = super::Transfer::begin();
-    let t_start = now_us();
-
-    let (window, open) = match ReadWindow::open_measured(sd) {
-        Ok(w) => w,
-        Err(e) => {
-            log::error!(
-                "{name}: could not mount the volume read-only: {e} ({})",
-                crate::journal::heap_note()
-            ); //not an error - something else could currently hold the RO lock
-            return respond(req, 503, b"volume unavailable\n");
-        }
-    };
-
-    let path = window.path(&format!("SLIPPI/{name}"));
-    let mut file = match std::fs::File::open(&path) {
-        Ok(f) => f,
-        Err(e) => {
-            log::warn!("{path}: {e}");
-            return respond(req, 404, b"not found\n");
-        }
-    };
-
-    let len = match file.metadata() {
-        Ok(m) => m.len(),
-        Err(e) => {
-            log::error!("{path}: could not stat: {e}");
-            return respond(req, 500, b"could not stat that replay\n");
-        }
-    };
-
-    let range = parse_range(req.header("Range"));
-    let ranged = matches!(range, RangeReq::From(_));
-    let resume = match range {
-        RangeReq::None => parse_from(req.header("X-Replay-From")),
-        _ => Resume::None,
-    };
-    let resumed = matches!(resume, Resume::At(_));
-
-    let want = match (&range, &resume) {
-        (RangeReq::Bad, _) | (_, Resume::Bad) => None,
-        (RangeReq::From(n), _) | (RangeReq::None, Resume::At(n)) => (*n < len).then_some(*n),
-        (RangeReq::None, Resume::None) => Some(0),
-    };
-    let Some(start) = want else {
-        let content_range = format!("bytes */{len}");
-        let mut resp = req.into_response(
-            416,
-            None,
-            &[
-                ("Content-Range", content_range.as_str()),
-                ("Accept-Ranges", "bytes"),
-            ],
-        )?;
-        resp.write_all(b"range not satisfiable\n")?;
-        resp.flush()?;
-        return Ok(());
-    };
-
-    let level = if debug_enabled() {
-        gz::level(req.header("X-Beamer-Gz-Level"))
-    } else {
-        gz::LEVEL_DEFAULT
-    };
-    let mut stream = if ranged || !gz::accepted(req.header("Accept-Encoding")) {
-        None
-    } else {
-        gz::Stream::begin(level)
-    };
-    let gzip = stream.is_some();
-
-    if start > 0 {
-        if let Err(e) = file.seek(SeekFrom::Start(start)) {
-            log::error!("{path}: seek to {start} failed: {e}");
-            return respond(req, 500, b"could not seek that replay\n");
-        }
-    }
-
-    let content_range;
-    let from_echo;
-    let mut headers = [("Content-Type", "application/octet-stream"); 4];
-    let mut n = 1;
-
-    let status = if ranged {
-        content_range = format!("bytes {start}-{}/{len}", len - 1);
-        headers[n] = ("Accept-Ranges", "bytes");
-        headers[n + 1] = ("Content-Range", content_range.as_str());
-        n += 2;
-        206
-    } else {
-        if gzip {
-            headers[n] = ("Content-Encoding", "gzip");
-            headers[n + 1] = ("Vary", "Accept-Encoding, X-Replay-From");
-            n += 2;
-        } else {
-            headers[n] = ("Accept-Ranges", "bytes");
-            n += 1;
-        }
-        if resumed {
-            from_echo = start.to_string();
-            headers[n] = ("X-Replay-From", from_echo.as_str());
-            n += 1;
-        }
-        200
-    };
-
-    let mut resp = req.into_response(status, None, &headers[..n])?;
-
-    let mut scratch = SCRATCH.lock().unwrap_or_else(|e| e.into_inner());
-    let Scratch { read: buf, out } = &mut *scratch;
-
-    crate::storage::msc::read_wait_reset();
-
-    let mut sent = 0u64;
-    let mut write_us = 0u32;
-    let mut write_max_us = 0u32;
-    let mut bytes = 0u64;
-    let mut chunks = 0u32;
-    let mut read_us = 0u32;
-    let mut read_max_us = 0u32;
-
-    {
-        let mut sink = |block: &[u8]| -> anyhow::Result<()> {
-            let t = now_us();
-            resp.write_all(block)?;
-            let took = (now_us() - t) as u32;
-            write_us += took;
-            write_max_us = write_max_us.max(took);
-            sent += block.len() as u64;
-            Ok(())
-        };
-
-        loop {
-            let t0 = now_us();
-            let n = match file.read(buf) {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(e) => {
-                    log::error!("{path}: read failed after the header: {e}");
-                    break;
-                }
-            };
-            let took = (now_us() - t0) as u32;
-            read_us += took;
-            read_max_us = read_max_us.max(took);
-
-            match stream.as_mut() {
-                Some(gz) => gz.push(&buf[..n], out, &mut sink)?,
-                None => sink(&buf[..n])?,
-            }
-
-            chunks += 1;
-            bytes += n as u64;
-        }
-
-        if let Some(gz) = stream.as_mut() {
-            gz.finish(out, &mut sink)?;
-        }
-    }
-
-    let (deflate_us, deflate_max_us) = stream
-        .as_ref()
-        .map_or((0, 0), |gz| (gz.deflate_us, gz.deflate_max_us));
-
-    let mut stats = TransferStats {
-        bytes,
-        sent_bytes: sent,
-        chunks,
-        gzip,
-        level: if gzip { level } else { 0 },
-        read_us,
-        read_max_us,
-        write_us,
-        write_max_us,
-        deflate_us,
-        deflate_max_us,
-        lock_us: open.lock_us,
-        mount_us: open.mount_us,
-        stack_left: unsafe { esp_idf_svc::sys::uxTaskGetStackHighWaterMark(std::ptr::null_mut()) },
-        ..TransferStats::default()
-    };
-
-    resp.flush()?;
-
-    (stats.sd_wait_us, stats.sd_wait_max_us) = crate::storage::msc::read_wait();
-    stats.total_us = (now_us() - t_start) as u32;
-    publish_stats(stats);
-    crate::journal::heap_checkin();
-    Ok(())
 }
 
 fn query_num(uri: &str, key: &str, default: usize, max: usize) -> usize {
@@ -509,6 +301,13 @@ where
     let n = query_num(req.uri(), "n", 4 * 1024 * 1024, MAX_N);
     let want = query_num(req.uri(), "chunk", CHUNK, MAX_CHUNK);
 
+    let shared = SCRATCH.try_lock().ok();
+    let mut scratch: Vec<u8> = Vec::new();
+    let big = want > CHUNK && scratch.try_reserve_exact(want).is_ok();
+    if !big && shared.is_none() {
+        return respond_json(req, 503, ERR_SERVING);
+    }
+
     let mut resp = req.into_response(
         200,
         None,
@@ -522,8 +321,6 @@ where
     let mut sent = 0usize;
     let mut chunks = 0u32;
 
-    let mut scratch: Vec<u8> = Vec::new();
-    let big = want > CHUNK && scratch.try_reserve_exact(want).is_ok();
     if big {
         scratch.resize(want, 0);
         while sent < n {
@@ -533,7 +330,7 @@ where
             chunks += 1;
         }
     } else {
-        let mut guard = SCRATCH.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = shared.expect("checked above");
         let buf = &mut guard.read;
         buf.fill(0);
         let step = want.min(CHUNK);
@@ -554,22 +351,18 @@ where
     Ok(())
 }
 
-fn respond<C>(
-    req: esp_idf_svc::http::server::Request<C>,
-    status: u16,
-    body: &[u8],
-) -> anyhow::Result<()>
-where
-    C: esp_idf_svc::http::server::Connection,
-    C::Error: std::error::Error + Send + Sync + 'static,
-{
-    req.into_status_response(status)?.write_all(body)?;
-    Ok(())
-}
+pub(super) const ERR_NOT_FOUND: &[u8] =
+    br#"{"ok": false, "error": "no such replay on this station"}"#;
+pub(super) const ERR_VOLUME: &[u8] =
+    br#"{"ok": false, "error": "the replay volume is busy; retry shortly"}"#;
+pub(super) const ERR_STAT: &[u8] = br#"{"ok": false, "error": "that replay could not be read"}"#;
+pub(super) const ERR_RANGE: &[u8] = br#"{"ok": false, "error": "range not satisfiable"}"#;
+pub(super) const ERR_LOW_MEMORY: &[u8] =
+    br#"{"ok": false, "error": "station is low on memory; retry shortly"}"#;
 
 const ERR_BUSY: &[u8] =
     br#"{"ok": false, "error": "another request is already running on this station"}"#;
-const ERR_SERVING: &[u8] =
+pub(super) const ERR_SERVING: &[u8] =
     br#"{"ok": false, "error": "a replay is being served right now; retry once it finishes"}"#;
 const ERR_GAME_LIVE: &[u8] =
     br#"{"ok": false, "error": "a game is being recorded right now; retry once it finishes"}"#;
@@ -606,6 +399,7 @@ fn with_status_body<R>(f: impl FnOnce(&report::Buf<{ report::STATUS_CAP }>) -> R
             link,
             fast,
             scan::replay_cap(),
+            super::transfers_in_flight(),
             scan::uptime_s(),
             errors::session_has_errors(),
             &crate::warnings::labels(),

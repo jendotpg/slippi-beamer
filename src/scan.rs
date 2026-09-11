@@ -78,8 +78,8 @@ pub fn with_fast<R>(f: impl FnOnce(&report::Fast) -> R) -> R {
     }
 }
 
-pub fn is_published(name: &str) -> bool {
-    lock(&SET).as_ref().is_some_and(|s| s.contains(name))
+pub fn published_size(name: &str) -> Option<u64> {
+    lock(&SET).as_ref().and_then(|s| s.size_of(name))
 }
 
 pub fn copy_index_into<const N: usize>(out: &mut report::Buf<N>) {
