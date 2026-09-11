@@ -166,8 +166,9 @@ pub fn run() -> anyhow::Result<()> {
 
     let mut last = State::Booting;
     let mut last_activity = (false, false);
-    let mut usb_since = std::time::Instant::now();
+    let ready_since = std::time::Instant::now();
     let mut warned_no_host = false;
+    let mut warned_not_ready = false;
     let mut reported_bad_read = false;
     let mut writing = Hold::new(WRITE_HOLD);
     let mut sending = Hold::new(SEND_HOLD);
@@ -177,12 +178,10 @@ pub fn run() -> anyhow::Result<()> {
         let is_sending = sending.poll(net::transfers_started(), net::transfers_in_flight() > 0);
         let usb_ok = storage::msc::mounted() && storage::msc::reads_ok() > 0;
         let waiting = !usb_ok && storage::msc::media_present();
-        if !waiting {
-            usb_since = std::time::Instant::now();
-        }
-        let settled = !waiting || usb_since.elapsed() >= HOST_GRACE;
+        let ready = ready_since.elapsed() >= READY_GRACE;
+        let settled = !waiting || ready;
 
-        if !warned_no_host && waiting && usb_since.elapsed() >= HOST_GRACE {
+        if !warned_no_host && waiting && ready {
             warned_no_host = true;
             if storage::msc::mounted() {
                 log::warn!(
@@ -191,7 +190,7 @@ pub fn run() -> anyhow::Result<()> {
                     storage::msc::mounts(),
                 );
             } else {
-                log::warn!("nothing has enumerated us in {}s", HOST_GRACE.as_secs());
+                log::warn!("nothing has enumerated us in {}s", READY_GRACE.as_secs());
             }
             warnings::set(WarningLabel::NoHost, true);
         }
@@ -200,13 +199,23 @@ pub fn run() -> anyhow::Result<()> {
             warnings::set(WarningLabel::NoHost, false);
         }
 
+        if !warned_not_ready && ready && net::result() == net::NetResult::Pending {
+            warned_not_ready = true;
+            log::warn!(
+                "the network has not come up in {}s: {:?}, standing warning {:?}",
+                READY_GRACE.as_secs(),
+                net::result(),
+                warnings::first(),
+            );
+        }
+
         let now = if !storage::msc::media_present() {
             State::Off
         } else if errors::session_has_errors() {
             State::Error
         } else if is_writing || is_sending {
             status::busy_now()
-        } else if !settled || (net::result() == net::NetResult::Pending && usb_ok) {
+        } else if !settled || (net::result() == net::NetResult::Pending && usb_ok && !ready) {
             State::Booting
         } else {
             status::idle_now()
@@ -335,7 +344,7 @@ fn eject(sd: &SdCard, id: &StationId) {
     log::info!("eject complete: safe to unplug");
 }
 
-const HOST_GRACE: Duration = Duration::from_secs(10); // time until "NO WII" warning
+const READY_GRACE: Duration = Duration::from_secs(15); // lower would mean CONNECT_TIMEOUT hasn't elapsed yet
 
 const EJECT_GRACE: Duration = Duration::from_secs(3);
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(30);

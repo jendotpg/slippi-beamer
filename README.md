@@ -5,14 +5,13 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 ## TODO:
 
 1. `Retry-After` should only be 15 seconds for replay pulls - otherwise shorter is fine!
-2. make no wifi warning fire after 20 seconds instead of 90
-3. redesign screen:
+2. redesign screen:
    1. always show station name (unless error or booting)
    2. icon in the top-right for when there's an error state
    3. icon in the bottom-right for when there's a busy state
 
-4. remove debug/zeros (its a nightmare and we already know what we wanted from it)
-5. get replay-manager-for-slippi fork caught up!
+3. remove debug/zeros (its a nightmare and we already know what we wanted from it)
+4. get replay-manager-for-slippi fork caught up!
 
 ## Hardware
 
@@ -33,7 +32,7 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 4. Unplug and replug the dongle to leave download mode. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`
 5. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
    1. See [Configuring a station](#configuring-a-station) for more details on this file.
-   2. Watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go! Otherwise, you probably entered the wifi wrong. This will look like a really really really long boot followed by a screen that says "WIFI ISSUE". Other errors will also show on screen - just read it and consult the [error list](#error-labels) or [warning list](#warning-labels)
+   2. Watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go! Otherwise, you probably entered the wifi wrong. This will look like about fifteen seconds of booting followed by a screen that says "WIFI ISSUE". Other errors will also show on screen - just read it and consult the [error list](#error-labels) or [warning list](#warning-labels)
 
 ## Configuring a station
 
@@ -312,11 +311,11 @@ cargo run --release
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.<br /><br />**Replace your microSD card - it's reached the end of its life.**                                                                                                                                                             |
 | `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served.<br /><br />**Reset drive.**                                                                                                                                                                                                                                      |
-| `NO WII`        | Nothing has read this drive in ten seconds. Usually this just means your beamer is plugged into a charger, a dead port, or a linux box that never mounted it.<br /><br />**If this beamer is plugged into a Wii: bad USB port.<br /> Otherwise ignore.**                                                                              |
+| `NO WII`        | Nothing has read this drive in fifteen seconds. Usually this just means your beamer is plugged into a charger, a dead port, or a linux box that never mounted it.<br /><br />**If this beamer is plugged into a Wii: bad USB port.<br /> Otherwise ignore.**                                                                          |
 | `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.<br /><br />**Probably either a Slippi Nintendont software issue or Wii USB port hardware issue. <br />Ignore it once or twice - if it keeps coming up, try a different port.**                                                    |
 | `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.<br /><br />**Reset drive.**                                                                                                                                                                                                                     |
 | `WEAK LINK`     | The wifi signal is weak.<br /><br />**Move the router closer to this setup. <br />Sometimes ignorable - the more full your venue, the more worried you should be about this.**                                                                                                                                                        |
-| `WIFI ISSUE`    | The wifi won't connect.<br /><br />**Usually this just means you put the wrong WiFI password. Fix config.txt. If that wasn't the issue, move the router closer to this setup. The beamer antenna is not as strong as the ones in your phone and laptop!**                                                                             |
+| `WIFI ISSUE`    | The wifi won't connect. Shows fifteen seconds after boot. **Usually this just means you put the wrong WiFI password. Fix config.txt. If that wasn't the issue, move the router closer to this setup. The beamer antenna is not as strong as the ones in your phone and laptop!**                                                      |
 | `WIFI TOO FULL` | The wifi connected but didn't issue an IP address - usually this means there are too many devices connected to the router.<br /><br />**Get your own router - see [choosing a router](#choosing-a-router). Sorry, the venue's router isn't cutting it for your tournament anymore. Tournament too big - good problems to have, huh?** |
 | `LOW MEMORY`    | Not enough heap to take another connection. Replays are refused with`503` until there's space.<br /><br />**Beamer is getting hammered pretty hard.<br />Ignore it once or twice - if it keeps happening, too many people are connecting to your beamer. Split into smaller sections.**                                               |
 
