@@ -180,10 +180,10 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
             return respond_json(req, 409, ERR_BUSY);
         };
         if super::transfers_in_flight() > 0 {
-            return respond_json(req, 409, ERR_SERVING);
+            return respond_json_retry(req, 409, ERR_SERVING, Some(RETRY_AFTER_SECONDS_STR));
         }
         if scan::game_live() {
-            return respond_json(req, 409, ERR_GAME_LIVE);
+            return respond_json_retry(req, 409, ERR_GAME_LIVE, Some(RETRY_AFTER_SECONDS_STR));
         }
         match volume::wipe_replays(&reset_card) {
             Ok(n) => {
@@ -368,6 +368,9 @@ const ERR_GAME_LIVE: &[u8] =
     br#"{"ok": false, "error": "a game is being recorded right now; retry once it finishes"}"#;
 const ERR_CONFIRM: &[u8] = br#"{"ok": false, "error": "POST /reset-beamer needs the header 'X-Beamer-Confirm: reset'. It erases every replay on this station."}"#;
 
+pub(super) const RETRY_AFTER_SECONDS: &std::ffi::CStr = c"15";
+pub(super) const RETRY_AFTER_SECONDS_STR: &str = "15";
+
 fn error_body(msg: &str) -> String {
     let mut s = String::from("{\"ok\": false, \"error\": \"");
     crate::slp::escape_json_into(msg, &mut s);
@@ -424,14 +427,32 @@ where
     C: esp_idf_svc::http::server::Connection,
     C::Error: std::error::Error + Send + Sync + 'static,
 {
-    let mut resp = req.into_response(
-        status,
-        None,
-        &[
-            ("Content-Type", "application/json"),
-            ("Cache-Control", "no-store"),
-        ],
-    )?;
+    respond_json_retry(req, status, body, None)
+}
+
+fn respond_json_retry<C>(
+    req: esp_idf_svc::http::server::Request<C>,
+    status: u16,
+    body: &[u8],
+    retry_after: Option<&str>,
+) -> anyhow::Result<()>
+where
+    C: esp_idf_svc::http::server::Connection,
+    C::Error: std::error::Error + Send + Sync + 'static,
+{
+    let base = [
+        ("Content-Type", "application/json"),
+        ("Cache-Control", "no-store"),
+    ];
+    let with_retry;
+    let headers: &[(&str, &str)] = match retry_after {
+        Some(secs) => {
+            with_retry = [base[0], base[1], ("Retry-After", secs)];
+            &with_retry
+        }
+        None => &base,
+    };
+    let mut resp = req.into_response(status, None, headers)?;
     resp.write_all(body)?;
     resp.flush()?;
     Ok(())

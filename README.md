@@ -4,14 +4,13 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. `Retry-After` should only be 15 seconds for replay pulls - otherwise shorter is fine!
-2. redesign screen:
+1. redesign screen:
    1. always show station name (unless error or booting)
    2. icon in the top-right for when there's an error state
    3. icon in the bottom-right for when there's a busy state
 
-3. remove debug/zeros (its a nightmare and we already know what we wanted from it)
-4. get replay-manager-for-slippi fork caught up!
+2. remove debug/zeros (its a nightmare and we already know what we wanted from it)
+3. get replay-manager-for-slippi fork caught up!
 
 ## Hardware
 
