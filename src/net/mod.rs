@@ -1,3 +1,4 @@
+pub mod announce;
 pub mod check;
 pub mod gz;
 pub mod http;
@@ -251,6 +252,8 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         ssid: Some(join.ssid.clone()),
     });
 
+    announce::open(&plan.station, &plan.station_name);
+
     if server.is_none() {
         set_result(NetResult::Fail);
     }
@@ -289,6 +292,7 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
                 station_name: next.station_name.clone(),
                 ssid: Some(join.ssid),
             });
+            announce::set_name(&next.station_name);
             crate::status::set_name(&next.station_name);
             since_tick = Duration::ZERO;
             log::info!("net: re-applied config -- http://{hostname}.local/");
@@ -358,6 +362,7 @@ fn stand_down(
         log::warn!("station is red: standing down -- no HTTP, no discovery");
     }
 
+    announce::close();
     transfer::shutdown(transfer_handle);
     drop(server);
     drop(mdns);

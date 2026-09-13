@@ -7,7 +7,6 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 1. update tools:
    1. add my stress test to the `tools/` directory (clean it up first LOL it fails sometimes against acceptable lwip ooms)
    2. get `fake-beamer.py`, which is basically identical since the old raspi version, updated to current project standards: rename to`fake_beamer.py`, port it to click, make sure its cleaned up
-2. multicast group for "beamer game finished" and then fire off a udp ping whenever a game is finished? this is really the right way to do subscription, probably, but make sure its not super overweight...
 
 ## Hardware
 
@@ -204,6 +203,46 @@ Setting `DEBUG` can sometimes add endpoints under `/debug/` - they're for me! If
 ### Discovery
 
 Every station advertises `_beamer._tcp` on port 80 over mDNS with the instance name as its hostname.
+
+### Multicast announce
+
+Whenever a game starts or finsihes a beamer will send a single UDP datagram to `239.255.42.1:34700` with multicast TTL 1. Joining that group lets an application poll `/status` and `/SLIPPI/` whenever game state changes. The datagram is best-effort and unacknowledged, so a missing one is normal - the source of truth is `/status` and `/SLIPPI/`.
+
+`game_finished`:
+
+```json
+{
+  "schema": 1,
+  "event": "game_finished",
+  "station_id": "3f2a...",
+  "station_name": "stream station 2",
+  "seq": 7,
+  "replay": {
+    "name": "Game_20260814T181203.slp",
+    "size": 412393, # final size on the card
+    "url": "/SLIPPI/Game_20260814T181203.slp" #accessible right now
+  },
+  "game": { ... } # the same object as /status "game" - here "live": false
+}
+```
+
+`game_started`:
+
+```json
+{
+  "schema": 1,
+  "event": "game_finished",
+  "station_id": "3f2a...",
+  "station_name": "stream station 2",
+  "seq": 8,
+  "replay": {
+    "name": "Game_20260814T181203.slp",
+    "size": 2134, # this is nonsense - don't worry about it!
+    "url": "/SLIPPI/Game_20260814T181203.slp" # not valid until the game is finished!
+  },
+  "game": { ... } # the same object as /status "game" - here "live": true
+}
+```
 
 ### `GET /status`
 
@@ -415,12 +454,13 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | Firmware tasks: journal log 4,096, scan 8,192, net 8,192, status 4,096, transfer 6,144 (peaks at 3,352 B, and does not move with how well a replay compresses). The journal drain's 8,192 joins them only when`DEBUG` is set |       30,720 |
 | WiFi (minus the`.bss` portion)                                                                                                                                                                                               |       21,950 |
 | httpd's lwIP pools and loopback control socket                                                                                                                                                                               |        5,508 |
+| The multicast socket                                                                                                                                                                                                         |       ~1,500 |
 | mDNS (minus the`.bss` portion)                                                                                                                                                                                               |        1,932 |
 | NVS page cache                                                                                                                                                                                                               |       ~3,000 |
 | The read window's FatFs registration                                                                                                                                                                                         |        2,220 |
 | The rendered reset census, two short lines held for the boot                                                                                                                                                                 |         ~250 |
 | Journal drain task (only when`DEBUG=true`)                                                                                                                                                                                   |        8,192 |
-| **Total**                                                                                                                                                                                                                    | **~124 KiB** |
+| **Total**                                                                                                                                                                                                                    | **~125 KiB** |
 
 #### Allocated by lwIP
 
@@ -441,10 +481,10 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | ...IRAM, the firmware's own code      |     94 KiB |
 | ...allocated statically at link time  |    167 KiB |
 | ...left for the heap                  |    171 KiB |
-| Allocated once at boot,`DEBUG=false`  |   ~116 KiB |
-| ...`DEBUG=true`                       |   ~124 KiB |
+| Allocated once at boot,`DEBUG=false`  |   ~117 KiB |
+| ...`DEBUG=true`                       |   ~125 KiB |
 | Allocated by lwIP while serving       |   9-18 KiB |
-| Free heap at rest                     | ~45-46 KiB |
+| Free heap at rest                     |    ~44 KiB |
 | Free heap while serving               | ~25-45 KiB |
 | Largest free block at rest            |    ~31 KiB |
 | Largest free block while serving      |   ~7.5 KiB |

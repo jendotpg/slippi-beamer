@@ -239,7 +239,7 @@ impl Tracker {
                 if !live {
                     let size = size_of(&window, &name);
                     drop(window);
-                    self.admit(&name, size);
+                    self.admit(&game, &name, size);
                     self.stop_tracking();
                     self.list();
                 }
@@ -362,7 +362,8 @@ impl Tracker {
             return;
         }
 
-        let mut finished: Vec<(String, u64)> = Vec::new();
+        let mut finished: Vec<(String, u64, slp::Game)> = Vec::new();
+        let mut started: Option<(String, u64, slp::Game)> = None;
         let mut bad = false;
         for name in &fresh {
             let Some(game) = peek(&window, name) else {
@@ -378,18 +379,22 @@ impl Tracker {
                 self.live = Some(name.clone());
                 self.pending_peek = false;
                 self.ticks_since_peek = 0;
+                started = Some((name.clone(), size_of(&window, name), game));
                 finished.clear();
                 break;
             }
             self.publish_game(&game);
-            finished.push((name.clone(), size_of(&window, name)));
+            finished.push((name.clone(), size_of(&window, name), game));
         }
 
         warnings::set(WarningLabel::SlpMisformat, bad);
 
         drop(window);
-        for (name, size) in finished {
-            self.admit(&name, size);
+        if let Some((name, size, game)) = started {
+            crate::net::announce::game_started(&game, &name, size);
+        }
+        for (name, size, game) in finished {
+            self.admit(&game, &name, size);
         }
     }
 
@@ -416,7 +421,7 @@ impl Tracker {
         );
     }
 
-    fn admit(&mut self, name: &str, size: u64) {
+    fn admit(&mut self, game: &slp::Game, name: &str, size: u64) {
         let at = uptime_s();
         let mut guard = lock(&SET);
         let Some(set) = guard.as_mut() else { return };
@@ -424,6 +429,7 @@ impl Tracker {
             let n = set.len();
             drop(guard);
             log::info!("scan: publishing {name} ({size} B); {n} replay(s) served");
+            crate::net::announce::game_finished(game, name, size);
         }
     }
 
