@@ -149,8 +149,7 @@ impl Watcher {
         let plan = Plan::from(&outcome, station_id);
         promote();
 
-        // the radio cannot come back from any of these without a re-boot
-        if errors::session_has_errors()
+        if errors::terminal()
             || net::result() != NetResult::Ok
             || plan.join.is_none()
             || self.plan.join.is_none()

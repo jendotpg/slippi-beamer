@@ -4,11 +4,10 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. rework errors/warnings: new rule is "errors require physical intervention" vs "warnings can be ignored/fixed ota". requires making errors recoverable (in particular, BAD WIFI)
-   1. stop
-   2. make "weak link" not a warning - instead, just show it as one bar of the wifi logo!
-   3. handle "lost connection some time after getting an ip" correctly - it doesnt show a warning right now! it should show an error. test with turning off router and also with updating config file.
-2. remove`POST/status`- there's no reason for application software to be able to do this (it's a remnant of walking the directory on a timer instead of when a game finishes)
+1. remove`POST/status`- there's no reason for application software to be able to do this (it's a remnant of walking the directory on a timer instead of when a game finishes)
+2. update tools:
+   1. add my stress test to the `tools/` directory (clean it up first LOL it fails sometimes against acceptable lwip ooms)
+   2. get `fake-beamer.py`, which is basically identical since the old raspi version, updated to current project standards: rename to`fake_beamer.py`, port it to click, make sure its cleaned up
 3. multicast group for "beamer game finished" and then fire off a udp ping whenever a game is finished? this is really the right way to do subscription, probably, but make sure its not super overweight...
 
 ## Hardware
@@ -252,7 +251,7 @@ Everything here is cached by the scan tick so this `GET` is very cheap - **it's 
   "secs_since_character_change": null, # how long has this ports+characters combo been in use
   "health": "ok", # ok, starting, warn, or errror
   "warnings": []
-  # note the lack of "errors" array - errors mean the beamer is no longer functioning, so it has to be dealt with physically anyway!
+  # note the lack of "errors" array - "health": "error" says you gotta walk up to the beamer anyway!
 }
 ```
 
@@ -338,38 +337,37 @@ cargo run --release
 
 **Blinking means something is happening - DO NOT UNPLUG.**
 
-A warning icon will appear and the LED will go amber if something is wrong but it's recoverable or ignorable (drive needs to be reset, wifi is a little too weak for safety, etc). If something is wrong but it's not recoverable (SD card misformatted, wrong wifi, etc) the LED will go red and the whole screen will show an error instead.
+A warning icon will appear and the LED will go amber if something is wrong but it's application recoverable or ignorable (drive needs to be reset, wifi is a little too weak for safety, etc). If something is wrong but it needs irl TO attention (SD card misformatted, wrong wifi, etc) the LED will go red and the whole screen will show an error instead.
 
 ### Error labels
 
-| Label           | What happened                                                                                                                        |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `NO ID`         | The board's factory MAC is unset or all zeroes.<br /><br />**This is a board-side hardware issue.**                                  |
-| `NO SD CARD`    | The card slot came up empty or no card responded.<br /><br />**This is probably a microSD card hardware issue.**                     |
-| `SD UNREADABLE` | A card is present but its filesystem will not mount.<br /><br />**This is probably a microSD card hardware issue.**                  |
-| `WRONG FORMAT`  | A card is readable but has no FAT32 partition or a first FAT32 partition bigger than 4 GB.<br /><br />**Reformat the microSD card**. |
-| `NO CONFIG`     | `CONFIG/config.txt` could not be read. <br /><br />**Fix config.txt.**                                                               |
-| `BAD CONFIG`    | The config file was read and rejected.<br /><br />**Fix config.txt.**                                                                |
-| `NO USB`        | The USB stack would not start.<br /><br />**This is a board-side hardware issue.**                                                   |
-| `NO WIFI`       | The ESP32 radio refused to start.<br /><br />**This is a board-side hardware issue.**                                                |
-| `NO HTTP`       | Nothing is being served over HTTP<br /><br />**DM me @jenpissgirl on Discord...**                                                    |
-| `NO MDNS`       | mDNS is not being offered<br /><br />**DM me @jenpissgirl on Discord...**                                                            |
-| `OUT OF MEMORY` | Beamer ran out of Memory<br /><br />**DM me @jenpissgirl on Discord...**                                                             |
-| `CRASHED`       | The firmware panicked somewhere.<br /><br />**DM me @jenpissgirl on Discord...**                                                     |
+| Label           | What happened                                                                                                                                                                                                                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NO ID`         | The board's factory MAC is unset or all zeroes.<br /><br />**This is a board-side hardware issue.**                                                                                                                                                                                                                                   |
+| `NO SD CARD`    | The card slot came up empty or no card responded.<br /><br />**This is probably a microSD card hardware issue.**                                                                                                                                                                                                                      |
+| `SD UNREADABLE` | A card is present but its filesystem will not mount.<br /><br />**This is probably a microSD card hardware issue.**                                                                                                                                                                                                                   |
+| `WRONG FORMAT`  | A card is readable but has no FAT32 partition or a first FAT32 partition bigger than 4 GB.<br /><br />**Reformat the microSD card**.                                                                                                                                                                                                  |
+| `NO CONFIG`     | `CONFIG/config.txt` could not be read. <br /><br />**Fix config.txt.**                                                                                                                                                                                                                                                                |
+| `BAD CONFIG`    | The config file was read and rejected.<br /><br />**Fix config.txt.**                                                                                                                                                                                                                                                                 |
+| `NO USB`        | The USB stack would not start.<br /><br />**This is a board-side hardware issue.**                                                                                                                                                                                                                                                    |
+| `RADIO FAILURE` | The ESP32 radio would not start.<br /><br />**This is a board-side hardware issue.**                                                                                                                                                                                                                                                  |
+| `WIFI ISSUE`    | The wifi won't connect. Shows fifteen seconds after boot.** Usually this just means you put the wrong WiFI password. Fix config.txt. If that wasn't the issue, move the router closer to this setup. The beamer antenna is not as strong as the ones in your phone and laptop!**                                                      |
+| `WIFI TOO FULL` | The wifi connected but didn't issue an IP address - usually this means there are too many devices connected to the router.<br /><br />**Get your own router - see [choosing a router](#choosing-a-router). Sorry, the venue's router isn't cutting it for your tournament anymore. Tournament too big - good problems to have, huh?** |
+| `NO HTTP`       | Nothing is being served over HTTP<br /><br />**DM me @jenpissgirl on Discord...**                                                                                                                                                                                                                                                     |
+| `NO MDNS`       | mDNS is not being offered<br /><br />**DM me @jenpissgirl on Discord...**                                                                                                                                                                                                                                                             |
+| `OUT OF MEMORY` | Beamer ran out of Memory<br /><br />**DM me @jenpissgirl on Discord...**                                                                                                                                                                                                                                                              |
+| `CRASHED`       | The firmware panicked somewhere.<br /><br />**DM me @jenpissgirl on Discord...**                                                                                                                                                                                                                                                      |
 
 ### Warning labels
 
-| Label           | What is off                                                                                                                                                                                                                                                                                                                           |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.<br /><br />**Replace your microSD card - it's reached the end of its life.**                                                                                                                                                             |
-| `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served.<br /><br />**Reset drive.**                                                                                                                                                                                                                                      |
-| `NO WII`        | Nothing has read this drive in fifteen seconds. Usually this just means your beamer is plugged into a charger, a dead port, or a linux box that never mounted it.<br /><br />**If this beamer is plugged into a Wii: bad USB port.<br /> Otherwise ignore.**                                                                          |
-| `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.<br /><br />**Probably either a Slippi Nintendont software issue or Wii USB port hardware issue. <br />Ignore it once or twice - if it keeps coming up, try a different port.**                                                    |
-| `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.<br /><br />**Reset drive.**                                                                                                                                                                                                                     |
-| `WEAK LINK`     | The wifi signal is weak.<br /><br />**Move the router closer to this setup. <br />Sometimes ignorable - the more full your venue, the more worried you should be about this.**                                                                                                                                                        |
-| `WIFI ISSUE`    | The wifi won't connect. Shows fifteen seconds after boot.** Usually this just means you put the wrong WiFI password. Fix config.txt. If that wasn't the issue, move the router closer to this setup. The beamer antenna is not as strong as the ones in your phone and laptop!**                                                      |
-| `WIFI TOO FULL` | The wifi connected but didn't issue an IP address - usually this means there are too many devices connected to the router.<br /><br />**Get your own router - see [choosing a router](#choosing-a-router). Sorry, the venue's router isn't cutting it for your tournament anymore. Tournament too big - good problems to have, huh?** |
-| `LOW MEMORY`    | Not enough heap to take another connection. Replays are refused with`503` until there's space.<br /><br />**Beamer is getting hammered pretty hard.<br />Ignore it once or twice - if it keeps happening, too many people are connecting to your beamer. Split into smaller sections.**                                               |
+| Label           | What is off                                                                                                                                                                                                                                                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DRIVE FAILING` | The card has stopped answering reads. Replays are still recorded, but not counted or served.<br /><br />**Replace your microSD card - it's reached the end of its life. This should be temporary (it turns into an error if it interrupts beamer operations). **                                                   |
+| `DRIVE FULL`    | `REPLAY-CAP` replays are on the card. New ones are no longer served.<br /><br />**Reset drive.**                                                                                                                                                                                                                   |
+| `NO WII`        | Nothing has read this drive in fifteen seconds. Usually this just means your beamer is plugged into a charger, a dead port, or a linux box that never mounted it.<br /><br />**If this beamer is plugged into a Wii: bad USB port.<br /> Otherwise ignore.**                                                       |
+| `SLP MISFORMAT` | A replay on the card will not parse. It is counted but never served; the station is otherwise fine.<br /><br />**Probably either a Slippi Nintendont software issue or Wii USB port hardware issue. <br />Ignore it once or twice - if it keeps coming up, try a different port.**                                 |
+| `DRIVE FILLING` | The card is past 75% of`REPLAY-CAP`. Delete replays before it stops serving new ones.<br /><br />**Reset drive.**                                                                                                                                                                                                  |
+| `LOW MEMORY`    | Not enough heap to take another connection. Replays are refused with`503` until there's space.<br /><br />**Beamer is getting hammered pretty hard.<br />Ignore it once or twice - if it keeps happening, too many people are connecting to your beamer. Consider using sharded networking instead of connected.** |
 
 ### FAT cache
 

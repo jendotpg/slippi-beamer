@@ -70,6 +70,10 @@ pub fn transfers_in_flight() -> u32 {
     IN_FLIGHT.load(Ordering::Relaxed)
 }
 
+pub fn connecting() -> bool {
+    wifi::connecting()
+}
+
 pub fn transfers_started() -> u32 {
     TRANSFERS.load(Ordering::Relaxed)
 }
@@ -192,19 +196,13 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
         Ok(l) => l,
         Err(e) => {
             fail(
-                crate::status::ErrorLabel::NoWifi,
+                crate::status::ErrorLabel::RadioFailure,
                 &["the system event loop would not start", &format!("{e}")],
             );
             down(NetResult::Fail);
             return;
         }
     };
-
-    if crate::errors::session_has_errors() {
-        log::warn!("station is already in the error state: not bringing the network up");
-        down(NetResult::Fail);
-        return;
-    }
 
     let Some(join) = plan.join else {
         log::info!("no SSID configured: this station has no network");
@@ -259,12 +257,10 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
 
     let mut since_tick = Duration::ZERO;
     let mut hostname = plan.hostname;
+    let mut last_oom = 0;
     let ejected = loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
             break true;
-        }
-        if crate::errors::session_has_errors() {
-            break false;
         }
 
         if let Some(next) = take_pending() {
@@ -329,16 +325,17 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
             );
 
             let failed = oom_count();
-            if failed > 0 {
+            if failed > last_oom {
+                last_oom = failed;
                 fail(
                     crate::status::ErrorLabel::OutOfMemory,
                     &[
-                        "the heap ran out and packets were dropped",
-                        &format!("{failed} allocation(s) failed"),
-                        "the station stops answering when this happens",
+                        "the heap ran out and a packet was dropped",
+                        &format!("{failed} allocation(s) have failed this boot"),
                     ],
                 );
-                break false;
+            } else if heap_too_low().is_none() {
+                crate::errors::resolve(crate::status::ErrorLabel::OutOfMemory);
             }
         }
     };

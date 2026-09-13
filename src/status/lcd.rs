@@ -345,7 +345,7 @@ impl<'d> Lcd<'d> {
 
         match state {
             State::Booting => {}
-            State::Error => self.error(d),
+            State::ErrorIdle | State::ErrorBusy => self.error(d),
             State::HealthyIdle | State::WarningIdle | State::HealthyBusy | State::WarningBusy => {
                 self.healthy(state, d)
             }
@@ -367,7 +367,7 @@ impl<'d> Lcd<'d> {
         };
 
         self.text_upper(name, GREEN);
-        self.wifi(d.net);
+        self.wifi(d.net, d.weak_signal);
         if matches!(state, State::WarningIdle | State::WarningBusy) {
             self.warning_icon();
         }
@@ -443,24 +443,36 @@ impl<'d> Lcd<'d> {
         }
     }
 
-    fn wifi(&mut self, net: Net) {
+    fn wifi(&mut self, net: Net, weak: bool) {
         const BOX_W: u16 = 28;
         const BOX_H: u16 = 16;
-        const ICON_W: usize = 15;
         let w = BOX_W as usize;
         let h = BOX_H as usize;
 
+        const BARS: [(usize, usize); 3] = [(6, 5), (14, 10), (22, 15)]; // (left x, height)
+        const BAR_W: usize = 4;
         let up = matches!(net, Net::Up(_));
-        let color = if up { GREEN } else { GREY };
+        let lit = match (up, weak) {
+            (false, _) => 0,
+            (true, true) => 1,
+            (true, false) => BARS.len(),
+        };
 
         let buf = unsafe { scratch() };
         paint(buf, w * h, BLACK);
-        draw_bits(buf, w, h, (w - ICON_W) / 2, 2, &WIFI, color);
-        if !up {
-            for dx in -1..=1 {
-                line(buf, w, h, (4 + dx, 0), (23 + dx, 15), BLACK);
+        for (i, &(x0, height)) in BARS.iter().enumerate() {
+            let color = if i < lit { GREEN } else { GREY };
+            for x in x0..x0 + BAR_W {
+                for y in h - height..h {
+                    put(buf, w, h, x, y, color);
+                }
             }
-            line(buf, w, h, (4, 0), (23, 15), RED);
+        }
+        if !up {
+            for dx in 0..2 {
+                line(buf, w, h, (6 + dx, 0), (12 + dx, 6), RED);
+                line(buf, w, h, (12 + dx, 0), (6 + dx, 6), RED);
+            }
         }
 
         self.blit(W - BOX_W, (H / 2 - BOX_H) / 2, BOX_W, BOX_H);
@@ -495,7 +507,7 @@ impl<'d> Lcd<'d> {
 
     fn error(&mut self, d: &Detail) {
         self.text_upper(d.label.map_or("ERROR", |l| l.as_str()), RED);
-        self.wifi(d.net);
+        self.wifi(d.net, d.weak_signal);
         self.text_full_lower(d);
     }
 
@@ -504,7 +516,7 @@ impl<'d> Lcd<'d> {
         const STEP: u16 = font::H as u16 + 3;
 
         let mut rows = ["", "", ""];
-        let fit = text::fit(&d.head, font::cols(W as usize, 1), &mut rows);
+        let fit = text::fit(&d.error_head, font::cols(W as usize, 1), &mut rows);
         let used = fit.used as u16 + u16::from(d.more > 0);
 
         let block = STEP.saturating_mul(used).saturating_sub(3);
@@ -632,16 +644,6 @@ fn draw_glyph(buf: &mut [u8], w: usize, h: usize, x: usize, c: char, scale: usiz
     }
 }
 
-fn draw_bits(buf: &mut [u8], w: usize, h: usize, x: usize, y: usize, rows: &[u16], color: u16) {
-    for (row, bits) in rows.iter().enumerate() {
-        for col in 0..u16::BITS as usize {
-            if bits >> col & 1 == 1 {
-                put(buf, w, h, x + col, y + row, color);
-            }
-        }
-    }
-}
-
 fn line(buf: &mut [u8], w: usize, h: usize, from: (i32, i32), to: (i32, i32), color: u16) {
     let ((x0, y0), (x1, y1)) = (from, to);
     let steps = (x1 - x0).abs().max((y1 - y0).abs()).max(1);
@@ -663,22 +665,6 @@ fn disc(buf: &mut [u8], w: usize, h: usize, cx: i32, cy: i32, r: i32, color: u16
         }
     }
 }
-
-// 15x11, the arcs top to bottom and then the dot.
-#[rustfmt::skip]
-const WIFI: [u16; 11] = [
-    0x07F0, // ....#######....
-    0x180C, // ..##.......##..
-    0x2002, // .#...........#.
-    0x03E0, // .....#####.....
-    0x0C18, // ...##.....##...
-    0x0000, // ...............
-    0x01C0, // ......###......
-    0x0220, // .....#...#.....
-    0x0000, // ...............
-    0x01C0, // ......###......
-    0x01C0, // ......###......
-];
 
 //throwback,,,
 const COS: [i16; 12] = [64, 55, 32, 0, -32, -55, -64, -55, -32, 0, 32, 55];

@@ -48,6 +48,8 @@ static STORE: Mutex<Store> = Mutex::new(Store {
     nvs: None,
 });
 
+static CURRENT: Mutex<Option<ErrorLabel>> = Mutex::new(None);
+
 fn store() -> MutexGuard<'static, Store> {
     STORE.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -93,10 +95,10 @@ pub fn error(target: Target, label: ErrorLabel, component: &str, lines: &[&str])
     let head_line = format!("[{component}] {head}");
 
     if s.blob(target).lines().any(|l| l == head_line) {
-        log::error!("(already recorded) {head_line}");
+        let more = s.distinct.saturating_sub(1);
         drop(s);
-        quiesce(label);
-        status::set(State::Error);
+        log::error!("(already recorded) {head_line}");
+        show(label, head, more);
         return;
     }
 
@@ -117,6 +119,11 @@ pub fn error(target: Target, label: ErrorLabel, component: &str, lines: &[&str])
             let _ = entry.push_str(line);
             let _ = entry.push('\n');
         }
+        let secs = unsafe { esp_idf_svc::sys::esp_timer_get_time() } / 1_000_000;
+        for _ in 0..component.len() + 3 {
+            let _ = entry.push(' ');
+        }
+        let _ = writeln!(entry, "({secs}s since boot)");
         let blob = match target {
             Target::Session => session,
             Target::Late => late,
@@ -135,13 +142,49 @@ pub fn error(target: Target, label: ErrorLabel, component: &str, lines: &[&str])
         log::error!("  {line}");
     }
 
-    quiesce(label);
-
-    status::set_error(label, head, more);
-    status::set(State::Error);
+    show(label, head, more);
 }
 
-/// Turns off the write-back cache
+fn show(label: ErrorLabel, head: &str, more: u32) {
+    let mut cur = CURRENT.lock().unwrap_or_else(|e| e.into_inner());
+    if *cur == Some(label) {
+        return; // already showing exactly this
+    }
+    let take = match *cur {
+        // keep the first terminal error
+        None => true,
+        Some(shown) => shown.clears_itself(),
+    };
+    if !take {
+        return;
+    }
+    *cur = Some(label);
+    drop(cur);
+
+    if !label.clears_itself() {
+        quiesce(label);
+    }
+    let head = if label.clears_itself() {
+        label.detail()
+    } else {
+        head
+    };
+    status::set_error(Some(label), head, more);
+    status::set(State::ErrorIdle);
+}
+
+pub fn resolve(label: ErrorLabel) {
+    let mut cur = CURRENT.lock().unwrap_or_else(|e| e.into_inner());
+    if *cur != Some(label) {
+        return;
+    }
+    *cur = None;
+    drop(cur);
+
+    log::info!("error cleared: {label}");
+    status::set_error(None, "", 0);
+}
+
 fn quiesce(label: ErrorLabel) {
     use crate::storage::msc;
     msc::set_policy(if label.is_storage_fault() {
@@ -183,9 +226,15 @@ pub fn halt(label: ErrorLabel, component: &str, lines: &[&str]) -> ! {
     }
 }
 
-pub fn session_has_errors() -> bool {
-    let s = store();
-    !s.session.is_empty() || !s.late.is_empty()
+pub fn present() -> bool {
+    CURRENT.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+}
+
+pub fn terminal() -> bool {
+    matches!(
+        *CURRENT.lock().unwrap_or_else(|e| e.into_inner()),
+        Some(l) if !l.clears_itself()
+    )
 }
 
 fn have_errors(s: &Store) -> bool {

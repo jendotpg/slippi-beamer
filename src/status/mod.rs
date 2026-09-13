@@ -23,22 +23,24 @@ pub use labels::{ErrorLabel, WarningLabel};
 pub enum State {
     Booting = 0,
     HealthyIdle = 1,
-    Error = 2,
+    ErrorIdle = 2,
     Off = 3,
     HealthyBusy = 4,
     WarningIdle = 5,
     WarningBusy = 6,
+    ErrorBusy = 7,
 }
 
 impl State {
     fn from_u8(v: u8) -> State {
         match v {
             1 => State::HealthyIdle,
-            2 => State::Error,
+            2 => State::ErrorIdle,
             3 => State::Off,
             4 => State::HealthyBusy,
             5 => State::WarningIdle,
             6 => State::WarningBusy,
+            7 => State::ErrorBusy,
             _ => State::Booting,
         }
     }
@@ -58,9 +60,10 @@ pub struct Detail {
     pub writing: bool, // to sd card
     pub sending: bool, // over wifi
     pub net: Net,
+    pub weak_signal: bool,         // wifi associated but the link is weak
     pub files: Option<(u32, u32)>, // replays on the card, and the file cap
-    pub label: Option<ErrorLabel>, // of the FIRST error
-    pub head: String,              // of the FIRST error
+    pub label: Option<ErrorLabel>, // of the error being shown
+    pub error_head: String,        // of the error being shown
     pub more: u32,
     pub warn: Option<WarningLabel>, // the most severe warning standing
     pub warn_more: u32,
@@ -135,6 +138,10 @@ pub fn set_net(net: Net) {
     publish(|d| d.net = net);
 }
 
+pub fn set_signal(weak: bool) {
+    publish(|d| d.weak_signal = weak);
+}
+
 pub fn set_activity(writing: bool, sending: bool) {
     publish(|d| {
         d.writing = writing;
@@ -146,13 +153,11 @@ pub fn set_files(files: u32, cap: u32) {
     publish(|d| d.files = Some((files, cap)));
 }
 
-pub(crate) fn set_error(label: ErrorLabel, head: &str, more: u32) {
+pub(crate) fn set_error(label: Option<ErrorLabel>, error_head: &str, more: u32) {
     publish(|d| {
-        if d.label.is_none() {
-            d.label = Some(label);
-            d.head.clear();
-            d.head.push_str(head);
-        }
+        d.label = label;
+        d.error_head.clear();
+        d.error_head.push_str(error_head);
         d.more = more;
     });
 }
@@ -174,11 +179,11 @@ const BOOT_MS_PER_FRAME: u64 = 100;
 fn led_bright(state: State, ms: u64) -> bool {
     match state {
         // Blinking means busy.
-        State::Booting | State::HealthyBusy | State::WarningBusy => {
+        State::Booting | State::HealthyBusy | State::WarningBusy | State::ErrorBusy => {
             (ms / BUSY_HALF_MS).is_multiple_of(2)
         }
         // Solid, in their own colours. `Off` never reads this.
-        State::HealthyIdle | State::WarningIdle | State::Error | State::Off => true,
+        State::HealthyIdle | State::WarningIdle | State::ErrorIdle | State::Off => true,
     }
 }
 

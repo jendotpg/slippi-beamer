@@ -323,7 +323,7 @@ fn with_status_body<R>(f: impl FnOnce(&report::Buf<{ report::STATUS_CAP }>) -> R
             scan::replay_cap(),
             super::transfers_in_flight(),
             scan::uptime_s(),
-            errors::session_has_errors(),
+            errors::present(),
             &crate::warnings::labels(),
             match super::result() {
                 super::NetResult::Ok => report::Health::Ok,

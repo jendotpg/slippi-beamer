@@ -154,7 +154,7 @@ pub fn run() -> anyhow::Result<()> {
     if let Err(e) = net::spawn(p.modem, nvs, sd.clone(), plan) {
         errors::error(
             Target::Late,
-            ErrorLabel::NoWifi,
+            ErrorLabel::RadioFailure,
             "net",
             &["the network task would not start", &format!("{e}")],
         );
@@ -212,10 +212,16 @@ pub fn run() -> anyhow::Result<()> {
 
         let now = if !storage::msc::media_present() {
             State::Off
-        } else if errors::session_has_errors() {
-            State::Error
+        } else if errors::present() {
+            if is_writing || is_sending {
+                State::ErrorBusy
+            } else {
+                State::ErrorIdle
+            }
         } else if is_writing || is_sending {
             status::busy_now()
+        } else if net::connecting() {
+            State::Booting
         } else if !finished_booting
             && (!settled || (net::result() == net::NetResult::Pending && usb_ok && !ready))
         {

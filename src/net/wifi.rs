@@ -15,8 +15,8 @@ use esp_idf_svc::wifi::{
     AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi, ScanMethod,
 };
 
+use crate::errors::{self, Target};
 use crate::status::{self, ErrorLabel, Net};
-use crate::warnings::{self, WarningLabel};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Join {
@@ -48,13 +48,13 @@ impl Radio {
     ) -> Result<Radio, ()> {
         let wifi = EspWifi::new(modem, sysloop.clone(), Some(nvs)).map_err(|e| {
             fail(
-                ErrorLabel::NoWifi,
+                ErrorLabel::RadioFailure,
                 &["the WiFi driver would not initialise", &e.to_string()],
             )
         })?;
         let wifi = BlockingWifi::wrap(wifi, sysloop).map_err(|e| {
             fail(
-                ErrorLabel::NoWifi,
+                ErrorLabel::RadioFailure,
                 &["the WiFi event wrapper would not start", &e.to_string()],
             )
         })?;
@@ -95,8 +95,9 @@ impl Radio {
         self.next_attempt = Instant::now();
     }
 
-    fn defer_retry(&mut self) {
-        warnings::set(WarningLabel::WifiNotAssociated, true);
+    fn defer_retry(&mut self, label: ErrorLabel) {
+        let ssid = format!("ssid {:?}", self.ssid);
+        errors::error(Target::Late, label, "net", &[label.detail(), &ssid]);
 
         self.next_attempt = Instant::now() + self.backoff;
         log::warn!(
@@ -108,6 +109,13 @@ impl Radio {
     }
 
     fn associate(&mut self, hostname: &str, join: &Join) -> Result<(), ()> {
+        CONNECTING.store(true, Ordering::Relaxed);
+        let result = self.try_associate(hostname, join);
+        CONNECTING.store(false, Ordering::Relaxed);
+        result
+    }
+
+    fn try_associate(&mut self, hostname: &str, join: &Join) -> Result<(), ()> {
         self.ssid = join.ssid.clone();
         set_hostname(&mut self.wifi, hostname);
 
@@ -130,14 +138,14 @@ impl Radio {
             .set_configuration(&Configuration::Client(conf))
             .map_err(|e| {
                 fail(
-                    ErrorLabel::NoWifi,
+                    ErrorLabel::RadioFailure,
                     &["the WiFi configuration was rejected", &e.to_string()],
                 )
             })?;
 
         self.wifi.start().map_err(|e| {
             fail(
-                ErrorLabel::NoWifi,
+                ErrorLabel::RadioFailure,
                 &["the radio would not start", &e.to_string()],
             )
         })?;
@@ -152,7 +160,7 @@ impl Radio {
         );
         if let Err(e) = self.wifi.connect() {
             log::warn!("could not associate with {:?}: {e}", join.ssid);
-            self.defer_retry();
+            self.defer_retry(ErrorLabel::WifiIssue);
             return Err(());
         }
 
@@ -165,15 +173,13 @@ impl Radio {
         let wifi = &self.wifi;
         if let Err(e) = wifi.ip_wait_while(|| wifi.is_up().map(|up| !up), Some(DHCP_TIMEOUT)) {
             log::warn!("no DHCP lease after {}s: {e}", DHCP_TIMEOUT.as_secs());
-            warnings::set(WarningLabel::WifiNoDHCPLease, true);
-            self.defer_retry();
+            self.defer_retry(ErrorLabel::WifiTooFull);
             return Err(());
         }
 
         let Some(ip) = current_ip(&self.wifi) else {
             log::warn!("associated, but the interface reports no address");
-            warnings::set(WarningLabel::WifiNoDHCPLease, true);
-            self.defer_retry();
+            self.defer_retry(ErrorLabel::WifiTooFull);
             return Err(());
         };
 
@@ -182,8 +188,9 @@ impl Radio {
             join.ssid
         );
         status::set_net(Net::Up(ip));
+        status::set_signal(false);
         self.reset_backoff();
-        clear_wifi_warnings();
+        clear_wifi_errors();
         Ok(())
     }
 
@@ -195,7 +202,7 @@ impl Radio {
             if let Some(ip) = current_ip(&self.wifi) {
                 status::set_net(Net::Up(ip));
                 self.reset_backoff();
-                clear_wifi_warnings();
+                clear_wifi_errors();
             }
             return;
         }
@@ -215,13 +222,13 @@ impl Radio {
         if let Err(e) = self.wifi.wifi_mut().connect() {
             log::warn!("reconnect failed: {e}");
         }
-        self.defer_retry();
+        self.defer_retry(ErrorLabel::WifiIssue);
     }
 }
 
-fn clear_wifi_warnings() {
-    warnings::set(WarningLabel::WifiNotAssociated, false);
-    warnings::set(WarningLabel::WifiNoDHCPLease, false);
+fn clear_wifi_errors() {
+    errors::resolve(ErrorLabel::WifiIssue);
+    errors::resolve(ErrorLabel::WifiTooFull);
 }
 
 fn current_ip(wifi: &BlockingWifi<EspWifi<'static>>) -> Option<Ipv4Addr> {
@@ -294,6 +301,11 @@ fn sample_link() {
     update_weak_link(Some(rssi));
 }
 
+static CONNECTING: AtomicBool = AtomicBool::new(false);
+pub fn connecting() -> bool {
+    CONNECTING.load(Ordering::Relaxed)
+}
+
 static TICK_FAST: AtomicBool = AtomicBool::new(false);
 pub fn tick_interval() -> Duration {
     if TICK_FAST.load(Ordering::Relaxed) {
@@ -336,7 +348,7 @@ fn update_weak_link(rssi: Option<i32>) {
 
     RUN.store(0, Ordering::Relaxed);
     WEAK.store(!weak, Ordering::Relaxed);
-    warnings::set(WarningLabel::WeakLink, !weak);
+    status::set_signal(!weak);
 }
 
 fn associated_ssid() -> Option<String> {
