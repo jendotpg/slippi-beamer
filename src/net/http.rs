@@ -111,14 +111,6 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
         with_status_body(|b| respond_json(req, 200, b.as_bytes()))
     })?;
 
-    server.fn_handler::<anyhow::Error, _>("/status", Method::Post, |req| {
-        let Ok(_guard) = API_LOCK.try_lock() else {
-            return respond_json(req, 409, ERR_BUSY);
-        };
-        scan::refresh();
-        with_status_body(|b| respond_json(req, 200, b.as_bytes()))
-    })?;
-
     server.fn_handler::<anyhow::Error, _>(SLIPPI_PREFIX, Method::Get, |req| {
         with_index_body(|b| respond_json(req, 200, b.as_bytes()))
     })?;

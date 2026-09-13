@@ -489,11 +489,6 @@ class Station:
         names.sort(reverse=True)
         return names[: self.args.served]
 
-    def refresh(self):
-        """What POST /status does: re-run the checks."""
-        with self.lock:
-            self.set_game(self.read_game())
-
     def status(self):
         with self.lock:
             game = self.game
@@ -750,12 +745,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.rfile.read(int(length))
 
-        if path == "/status":
-            time.sleep(self.station.args.post_delay)
-            self.station.refresh()
-            self.send_json(200, self.station.status())
-            return
-
         if path == "/reset-beamer":
             if self.headers.get("X-Beamer-Confirm") != "reset":
                 self.send_error_json(
@@ -851,12 +840,6 @@ def main():
         type=float,
         default=30.0,
         help="how long --stall-every holds the connection open",
-    )
-    parser.add_argument(
-        "--post-delay",
-        type=float,
-        default=1.0,
-        help="seconds POST /status takes, so the spinner is visible",
     )
     args = parser.parse_args()
 

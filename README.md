@@ -4,11 +4,10 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 
 ## TODO:
 
-1. remove`POST/status`- there's no reason for application software to be able to do this (it's a remnant of walking the directory on a timer instead of when a game finishes)
-2. update tools:
+1. update tools:
    1. add my stress test to the `tools/` directory (clean it up first LOL it fails sometimes against acceptable lwip ooms)
    2. get `fake-beamer.py`, which is basically identical since the old raspi version, updated to current project standards: rename to`fake_beamer.py`, port it to click, make sure its cleaned up
-3. multicast group for "beamer game finished" and then fire off a udp ping whenever a game is finished? this is really the right way to do subscription, probably, but make sure its not super overweight...
+2. multicast group for "beamer game finished" and then fire off a udp ping whenever a game is finished? this is really the right way to do subscription, probably, but make sure its not super overweight...
 
 ## Hardware
 
@@ -196,7 +195,6 @@ All responses are JSON. There is no authentication: anyone who can reach the sta
 | Method | Path             | What it does                                                                             |
 | ------ | ---------------- | ---------------------------------------------------------------------------------------- |
 | `GET`  | `/status`        | The last status report, straight off the two fragments. Runs nothing, so poll it freely. |
-| `POST` | `/status`        | Re-runs the scan tick, then returns the fresh report.                                    |
 | `GET`  | `/SLIPPI/`       | Index of the replays this station is currently serving. See[Publishing](#publishing).    |
 | `GET`  | `/SLIPPI/<file>` | The replay itself.                                                                       |
 | `POST` | `/reset-beamer`  | Wipes the replay drive. Requires`X-Beamer-Confirm: reset`.                               |
@@ -209,7 +207,7 @@ Every station advertises `_beamer._tcp` on port 80 over mDNS with the instance n
 
 ### `GET /status`
 
-Everything here is cached by the scan tick so this `GET` is very cheap - **it's the pollable endpoint**.`POST` the same URL to rescan on demand.
+Everything here is cached by the scan tick so this `GET` is very cheap - **it's the pollable endpoint**.
 
 ```json
 {
