@@ -168,7 +168,8 @@ pub fn serve(sd: Arc<SdCard>) -> anyhow::Result<EspHttpServer<'static>> {
             return respond_json(req, 409, ERR_BUSY);
         };
         if super::transfers_in_flight() > 0 {
-            return respond_json_retry(req, 409, ERR_SERVING, Some(RETRY_AFTER_SECONDS_STR));
+            let secs = super::retry_after_secs().to_string();
+            return respond_json_retry(req, 409, ERR_SERVING, Some(&secs));
         }
         if scan::game_live() {
             return respond_json_retry(req, 409, ERR_GAME_LIVE, Some(RETRY_AFTER_SECONDS_STR));
@@ -279,7 +280,6 @@ const ERR_GAME_LIVE: &[u8] =
     br#"{"ok": false, "error": "a game is being recorded right now; retry once it finishes"}"#;
 const ERR_CONFIRM: &[u8] = br#"{"ok": false, "error": "POST /reset-beamer needs the header 'X-Beamer-Confirm: reset'. It erases every replay on this station."}"#;
 
-pub(super) const RETRY_AFTER_SECONDS: &std::ffi::CStr = c"15";
 pub(super) const RETRY_AFTER_SECONDS_STR: &str = "15";
 
 fn error_body(msg: &str) -> String {

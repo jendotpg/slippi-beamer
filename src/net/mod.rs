@@ -34,6 +34,7 @@ pub enum NetResult {
 static RESULT: AtomicU8 = AtomicU8::new(NetResult::Pending as u8);
 static IN_FLIGHT: AtomicU32 = AtomicU32::new(0);
 static TRANSFERS: AtomicU32 = AtomicU32::new(0);
+static FINISH_US: Mutex<u64> = Mutex::new(0); //theres no 64bit atomics...
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 static DOWN: AtomicBool = AtomicBool::new(false);
 
@@ -78,6 +79,20 @@ pub fn connecting() -> bool {
 pub fn transfers_started() -> u32 {
     TRANSFERS.load(Ordering::Relaxed)
 }
+
+const SPEED_BPS: u64 = 300 * 1024; // assume 300 KiBs transfer speed
+const DEFAULT_RETRY_SECS: u64 = 15;
+const MIN_RETRY_SECS: u64 = 1;
+
+pub fn retry_after_secs() -> u64 {
+    let finish_us = *FINISH_US.lock().unwrap_or_else(|e| e.into_inner());
+    let remaining_us = finish_us.saturating_sub(http::now_us() as u64);
+    if remaining_us == 0 {
+        return DEFAULT_RETRY_SECS;
+    }
+    remaining_us.div_ceil(1_000_000).max(MIN_RETRY_SECS)
+}
+
 const SEGMENT: u32 = (16 + 56 + CONFIG_LWIP_TCP_MSS + 4) + (16 + 4);
 pub const CONN_HEAP: u32 = (CONFIG_LWIP_TCP_SND_BUF_DEFAULT / CONFIG_LWIP_TCP_MSS) * SEGMENT;
 pub const HEAP_FLOOR: u32 = CONFIG_LWIP_MAX_ACTIVE_TCP * CONN_HEAP + 8 * 1024;
@@ -104,7 +119,9 @@ pub fn oom_count() -> u32 {
 pub struct Transfer;
 
 impl Transfer {
-    pub fn begin() -> Transfer {
+    pub fn begin(bytes: u64) -> Transfer {
+        let projected_us = bytes * 1_000_000 / SPEED_BPS;
+        *FINISH_US.lock().unwrap_or_else(|e| e.into_inner()) = http::now_us() as u64 + projected_us;
         IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
         TRANSFERS.fetch_add(1, Ordering::Relaxed);
         Transfer
@@ -113,6 +130,7 @@ impl Transfer {
 
 impl Drop for Transfer {
     fn drop(&mut self) {
+        *FINISH_US.lock().unwrap_or_else(|e| e.into_inner()) = 0;
         IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
     }
 }

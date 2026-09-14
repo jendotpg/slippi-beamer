@@ -7,7 +7,6 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 1. update tools:
    1. add my stress test to the `tools/` directory (clean it up first LOL it fails sometimes against acceptable lwip ooms)
    2. get `fake-beamer.py`, which is basically identical since the old raspi version, updated to current project standards: rename to`fake_beamer.py`, port it to click, make sure its cleaned up
-2. make `Retry-After`a fair guess instead of a flat 15seconds
 
 ## Hardware
 
@@ -331,7 +330,7 @@ A few notes:
 
 Posts can be refused with `409` - this is expected, handle it smoothly in application code. The beamer won't reset the drive while a game is live, so backoffs for that endpoint should be LONG.
 
-Sometimes an transfer will come back `503` - this usually means another application is already pulling from the beamer. Sometimes it's because of memory pressure for some other reason. Application code should respect the `Retry-After`.
+Sometimes an transfer will come back `503` - this usually means another application is already pulling from the beamer. Sometimes it's because of memory pressure for some other reason. Application code should respect the `Retry-After`, as it's meaningfully calculated rather than guessed wildly.
 
 ## Testing without a station
 

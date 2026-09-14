@@ -158,6 +158,12 @@ impl RawResponse {
     }
 }
 
+fn retry_after(resp: &RawResponse) {
+    if let Ok(secs) = std::ffi::CString::new(super::retry_after_secs().to_string()) {
+        resp.hdr(c"Retry-After", &secs);
+    }
+}
+
 fn run(card: &SdCard, job: &Job) -> anyhow::Result<()> {
     use std::io::{Read as _, Seek as _, SeekFrom};
 
@@ -168,13 +174,13 @@ fn run(card: &SdCard, job: &Job) -> anyhow::Result<()> {
         Ok(Some(w)) => w,
         Ok(None) => {
             log::warn!("{}: the RO lock is held; refusing", job.name);
-            resp.hdr(c"Retry-After", http::RETRY_AFTER_SECONDS);
+            retry_after(&resp);
             resp.send(S_503, H_JSON, http::ERR_VOLUME);
             return Ok(());
         }
         Err(e) => {
             log::error!("{}: could not mount read-only: {e}", job.name);
-            resp.hdr(c"Retry-After", http::RETRY_AFTER_SECONDS);
+            retry_after(&resp);
             resp.send(S_503, H_JSON, http::ERR_VOLUME);
             return Ok(());
         }
@@ -374,13 +380,13 @@ unsafe extern "C" fn handle(r: *mut httpd_req_t) -> esp_err_t {
                 super::BLOCK_FLOOR
             ),
         }
-        resp.hdr(c"Retry-After", http::RETRY_AFTER_SECONDS);
+        retry_after(&resp);
         return resp.send(S_503, H_JSON, http::ERR_LOW_MEMORY);
     }
 
     if super::transfers_in_flight() > 0 || busy() {
         log::info!("refusing {name}: already serving a replay");
-        resp.hdr(c"Retry-After", http::RETRY_AFTER_SECONDS);
+        retry_after(&resp);
         return resp.send(S_503, H_JSON, http::ERR_SERVING);
     }
 
@@ -424,7 +430,7 @@ unsafe extern "C" fn handle(r: *mut httpd_req_t) -> esp_err_t {
     let mut async_req: *mut httpd_req_t = std::ptr::null_mut();
     if httpd_req_async_handler_begin(r, &mut async_req) != ESP_OK || async_req.is_null() {
         log::error!("refusing {name}: could not take the request async");
-        resp.hdr(c"Retry-After", http::RETRY_AFTER_SECONDS);
+        retry_after(&resp);
         return resp.send(S_503, H_JSON, http::ERR_LOW_MEMORY);
     }
 
@@ -436,14 +442,14 @@ unsafe extern "C" fn handle(r: *mut httpd_req_t) -> esp_err_t {
         resumed,
         gzip,
         level,
-        _transfer: super::Transfer::begin(),
+        _transfer: super::Transfer::begin(indexed_len - start),
     };
 
     if let Err(job) = enqueue(job) {
         let async_req = job.req;
         drop(job);
         let late = RawResponse(async_req);
-        late.hdr(c"Retry-After", http::RETRY_AFTER_SECONDS);
+        retry_after(&late);
         late.send(S_503, H_JSON, http::ERR_SERVING);
         httpd_req_async_handler_complete(async_req);
     }
