@@ -2,12 +2,6 @@
 
 I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have confirmed both can report sets succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi) (although the raspi firmware is now quite out of date...)
 
-## TODO:
-
-1. update tools:
-   1. add my stress test to the `tools/` directory (clean it up first LOL it fails sometimes against acceptable lwip ooms)
-   2. get `fake-beamer.py`, which is basically identical since the old raspi version, updated to current project standards: rename to`fake_beamer.py`, port it to click, make sure its cleaned up
-
 ## Hardware
 
 | Item                        | Detail                                                                                                                                                                                                                                             | Where I Source Them                                                                                                                    |
@@ -334,13 +328,13 @@ Sometimes an transfer will come back `503` - this usually means another applicat
 
 ## Testing without a station
 
-Everything a beamer application sees is an mDNS advertisement and five HTTP endpoints. We ship a script to offer this locally as a fake beamer.
+Everything a beamer application sees is an mDNS advertisement, the HTTP endpoints, and the game events. We ship a script to offer this locally as a fake beamer.
 
 ```bash
-tools/fake-beamer.py --name beamer-stream-1 --port 8081 --replays ~/slp/stream1 --game ~/slp/live.slp
+tools/fake_beamer.py --name beamer-stream-1 --port 8081 --replays ~/slp/stream1 --game ~/slp/live.slp
 ```
 
-`--game` is peeked out of a real `.slp`.Run several on different ports to simulate a fleet. `--unhealthy` and `--unreported` produce the two known failure states of `/status`.
+`--game` is peeked out of a real `.slp`. Run several on different ports to simulate a fleet. Like a real station, it serves one replay at a time (a second concurrent download gets `503`) and streams chunked with no `Content-Length`. `game_started` is broadcast on startup - send `SIGHUP` (Ctrl-C :P) to broadcast the `game_finished` event.
 
 ## Beamer firmware
 

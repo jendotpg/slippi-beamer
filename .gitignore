@@ -7,3 +7,4 @@ target/
 components_esp32s3.lock
 build/
 *.pyc
+tools/measurements/

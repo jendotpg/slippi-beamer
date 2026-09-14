@@ -1,35 +1,15 @@
-#!/usr/bin/env python3
-"""
-fake-beamer - pretend to be a Beamer station, without a Beamer.
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["click"]
+# ///
 
-Everything replay-manager talks to is an mDNS advertisement and five HTTP
-endpoints. None of it needs a Pi, a USB gadget, an LED or a Wii. So this serves
-the endpoints and advertises itself, which is enough to develop and test the
-whole app-side fleet view on one laptop:
-
-tools/fake-beamer.py --name beamer-virtual-1 --port 8081 --replays ~/Slippi/ --game ~/Slippi/Game_20230110T102627.slp --station-name "Fake 1"
-
-tools/fake-beamer.py --name beamer-virtual-2 --port 8082 --replays ~/Slippi/ --game ~/Slippi/Game_20230110T102700.slp  --station-name "Fake 2"
-
-Run several on different ports to simulate a fleet. The app honours the port a
-station advertises, so they coexist happily on one machine.
-
-The game payload is not canned: --game is read out of a real .slp by the peek
-below, a port of the same beamer::slp the firmware runs. That is what makes the
-character icons in the app a real test rather than a drawing exercise, and it
-needs nothing built -- no Rust, no C, no cross-compiler.
-
-What this deliberately does NOT emulate: the gadget, the LED, the config file,
-the reset endpoint's actual destruction, and any of the timing of a real Zero W.
-It is a stand-in for the fleet view, not for a station.
-"""
-
-import argparse
 import json
 import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -37,6 +17,13 @@ import time
 import uuid
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
+
+import click
+
+sys.dont_write_bytecode = True
+
+import beamer_lib as beamer
 
 SCHEMA = 1
 DEFAULT_SERVED = 10
@@ -44,7 +31,24 @@ DEFAULT_CAP = 512
 CHUNK = 8 * 1024
 GZ_WINDOW_BITS = 10
 GZ_MEM_LEVEL = 3
-GZ_LEVEL = 6
+GZ_LEVEL = 2  # the firmware's default
+
+ANNOUNCE_GROUP = "239.255.42.1"
+ANNOUNCE_PORT = 34700
+
+FAKE_RSSI = 0
+FAKE_PHY_MODE = "fake"
+FAKE_CHANNEL = 0
+
+ERR_NOT_FOUND = "no such replay on this station"
+ERR_STAT = "that replay could not be read"
+ERR_RANGE = "range not satisfiable"
+ERR_SERVING = "a replay is being served right now; retry once it finishes"
+ERR_CONFIRM = ("POST /reset-beamer needs the header 'X-Beamer-Confirm: reset'. "
+               "It erases every replay on this station.")
+ERR_GAME_LIVE = "a game is being recorded right now; retry once it finishes"
+RETRY_AFTER_SERVING = "2"
+RETRY_AFTER_GAME_LIVE = "15"
 
 
 # A port of beamer::slp (src/slp.rs)
@@ -82,9 +86,7 @@ CHARS = [
 
 
 class PeekError(Exception):
-    """Any failure here means do not publish. Messages match PeekError::as_str
-    in src/slp.rs, and slp-peek.c before it, so a log line greps the
-    same across all three."""
+    """Any failure here means do not publish."""
 
 
 REPLACEMENT = "\ufffd"
@@ -328,8 +330,6 @@ def sjis_next(p):
 
 
 def decode_nametag(tag):
-    """Decode a 16-byte nametag field. None for an empty tag, matching the C,
-    which prints null when it decoded nothing."""
     out = []
     i = 0
     while i < len(tag):
@@ -347,14 +347,11 @@ def peek(buf):
     if n < 17 or not buf.startswith(MAGIC):
         raise PeekError("not an .slp file")
 
-    # The `raw` element's length. Slippi writes it last, so zero means the game
-    # is still being played.
     live = int.from_bytes(buf[11:15], "big") == 0
 
     if buf[15] != 0x35:
         raise PeekError("no event payloads command")
 
-    # Event Payloads: one size byte covering itself plus three bytes per entry.
     psz = buf[16]
     if psz < 4 or (psz - 1) % 3 != 0:
         raise PeekError("bad event payloads size")
@@ -363,8 +360,6 @@ def peek(buf):
     if 17 + 3 * nent > n:
         raise PeekError("truncated event payloads")
 
-    # The declared size of the Game Start payload says whether this replay is
-    # old enough to predate nametags.
     gs_size = 0
     for i in range(nent):
         if buf[17 + 3 * i] == 0x36:
@@ -424,18 +419,16 @@ def port_sig(game):
 
 
 def character_sig(game):
-    # No costume: a colour swap is not a character change.
     return tuple((p["port"], p["char_id"]) for p in game["ports"]) if game else None
 
 
 class Station:
-    """The mutable half: what this station currently claims about itself."""
-
     def __init__(self, args):
         self.args = args
         self.station_id = args.station or str(uuid.uuid5(uuid.NAMESPACE_DNS, args.name))
         self.station_name = args.station_name or ""
-        self.lock = threading.Lock()
+        self.lock = threading.Lock() # safe "set_game" call
+        self.transfer_lock = threading.Lock()
         self.replay_requests = 0
         self.port_sig = None
         self.character_sig = None
@@ -445,41 +438,42 @@ class Station:
         self.game = None
         self.set_game(self.read_game())
 
+    def live(self):
+        return self.game is not None and self.game["live"]
+
     def set_game(self, game):
-        """What publish_game does: stamp the clocks when a signature changes."""
-        was_live = self.game is not None and self.game["live"]
-        self.game = game
-        if game is None:
-            return
-        now = time.monotonic()
-        if game["live"] and not was_live:
-            self.game_start_at = now
-        ports, chars = port_sig(game), character_sig(game)
-        if self.port_sig != ports:
-            self.port_sig = ports
-            self.port_change_at = now
-        if self.character_sig != chars:
-            self.character_sig = chars
-            self.character_change_at = now
+        with self.lock:
+            was_live = self.game is not None and self.game["live"]
+            self.game = game
+            if game is None:
+                return
+            now = time.monotonic()
+            if game["live"] and not was_live:
+                self.game_start_at = now
+            ports, chars = port_sig(game), character_sig(game)
+            if self.port_sig != ports:
+                self.port_sig = ports
+                self.port_change_at = now
+            if self.character_sig != chars:
+                self.character_sig = chars
+                self.character_change_at = now
 
     def read_game(self):
-        """Peek at --game, the same way the scan tick does on a station."""
         if not self.args.game:
             return None
         try:
             with open(self.args.game, "rb") as f:
                 buf = f.read(PEEK_BYTES)
         except OSError as e:
-            print(f"fake-beamer: cannot read {self.args.game}: {e}", file=sys.stderr)
+            print(f"fake_beamer: cannot read {self.args.game}: {e}", file=sys.stderr)
             return None
         try:
             return peek(buf)
         except PeekError as e:
-            print(f"fake-beamer: {self.args.game}: {e}", file=sys.stderr)
+            print(f"fake_beamer: {self.args.game}: {e}", file=sys.stderr)
             return None
 
     def replays(self):
-        """Newest first, capped, mirroring what the flush publishes."""
         if not self.args.replays:
             return []
         try:
@@ -507,8 +501,12 @@ class Station:
             "station_id": self.station_id,
             "station_name": self.station_name,
             "ssid": self.args.wifi,
+            "rssi": self.args.rssi,
+            "phy_mode": self.args.phy_mode,
+            "channel": self.args.channel,
             "replay_count": len(self.replays()),
             "replay_cap": self.args.cap,
+            "serving": 1 if self.transfer_lock.locked() else 0,
             "ssh": False,
             "game": game,
             "secs_since_port_change": since_ports,
@@ -516,6 +514,26 @@ class Station:
             "secs_since_game_start": since_game,
             "health": self.health(),
             "warnings": self.warnings(),
+        }
+
+    def announce_payload(self, event, seq):
+        replay = None
+        names = self.replays()
+        if names:
+            name = names[0]
+            try:
+                size = os.path.getsize(os.path.join(self.args.replays, name))
+                replay = {"name": name, "size": size, "url": f"/SLIPPI/{name}"}
+            except OSError:
+                replay = None
+        return {
+            "schema": SCHEMA,
+            "event": event,
+            "station_id": self.station_id,
+            "station_name": self.station_name,
+            "seq": seq,
+            "replay": replay,
+            "game": self.game,
         }
 
     def warnings(self):
@@ -550,26 +568,36 @@ class Station:
 
 SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+\.slp$")
 
-
 class Handler(BaseHTTPRequestHandler):
     station: Station = None
 
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
-        print(f"fake-beamer[{self.station.args.port}] {fmt % args}", file=sys.stderr)
+        print(f"fake_beamer[{self.station.args.port}] {fmt % args}", file=sys.stderr)
 
-    def send_json(self, code, payload):
+    def send_json(self, code, payload, extra=None):
         body = json.dumps(payload).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for key, value in (extra or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
-    def send_error_json(self, code, message):
-        self.send_json(code, {"ok": False, "error": message})
+    def send_error_json(self, code, message, extra=None):
+        self.send_json(code, {"ok": False, "error": message}, extra)
+
+    def send_text(self, code, text):
+        body = text.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self):
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
@@ -589,11 +617,13 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_replay(path[len("/SLIPPI/") :])
             return
 
-        self.send_error_json(403 if path == "/" else 404, "no such endpoint")
+        # GET / is a plain-text 403 on a real station (net/http.rs).
+        if path == "/":
+            self.send_text(403, "forbidden\n")
+            return
+        self.send_error_json(404, "no such endpoint")
 
     def parse_range(self, total):
-        """`bytes=N-` only, matching the firmware. Returns a start offset,
-        None for no Range, or "bad" for anything unsatisfiable."""
         raw = self.headers.get("Range")
         if raw is None:
             return None
@@ -610,8 +640,6 @@ class Handler(BaseHTTPRequestHandler):
         return n if 0 <= n < total else "bad"
 
     def parse_from(self, total):
-        """`X-Replay-From: N`, the resume the firmware can still compress.
-        Returns an offset, None when absent, or "bad"."""
         raw = self.headers.get("X-Replay-From")
         if raw is None:
             return None
@@ -649,28 +677,37 @@ class Handler(BaseHTTPRequestHandler):
 
     def serve_replay(self, name):
         if not SAFE_NAME.match(name) or not self.station.args.replays:
-            self.send_error_json(404, "no such replay")
+            self.send_error_json(404, ERR_NOT_FOUND)
             return
         full = os.path.join(self.station.args.replays, name)
         if not os.path.isfile(full):
-            self.send_error_json(404, "no such replay")
+            self.send_error_json(404, ERR_NOT_FOUND)
             return
+
+        if not self.station.transfer_lock.acquire(blocking=False): # one at a time, just like firmware
+            self.send_error_json(503, ERR_SERVING, {"Retry-After": RETRY_AFTER_SERVING})
+            return
+        try:
+            self._stream_replay(full)
+        finally:
+            self.station.transfer_lock.release()
+
+    def _stream_replay(self, full):
         try:
             with open(full, "rb") as f:
                 body = f.read()
         except OSError:
-            self.send_error_json(500, "could not read that replay")
+            self.send_error_json(500, ERR_STAT)
             return
 
         total = len(body)
         start = self.parse_range(total)
         resume = None if start is not None else self.parse_from(total)
         if start == "bad" or resume == "bad":
-            self.send_response(416)
-            self.send_header("Content-Range", f"bytes */{total}")
-            self.send_header("Accept-Ranges", "bytes")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            self.send_error_json(416, ERR_RANGE, {
+                "Content-Range": f"bytes */{total}",
+                "Accept-Ranges": "bytes",
+            })
             return
 
         ranged = start is not None
@@ -690,13 +727,9 @@ class Handler(BaseHTTPRequestHandler):
         truncate = self.station.args.truncate_every
         stall = self.station.args.stall_every
 
-        chunked = self.station.args.chunked or gzip
         self.send_response(206 if ranged else 200)
         self.send_header("Content-Type", "application/octet-stream")
-        if chunked:
-            self.send_header("Transfer-Encoding", "chunked")
-        else:
-            self.send_header("Content-Length", str(len(body)))
+        self.send_header("Transfer-Encoding", "chunked") # always chunked - real firmware is memory starved
         if gzip:
             self.send_header("Content-Encoding", "gzip")
             self.send_header("Vary", "Accept-Encoding, X-Replay-From")
@@ -709,38 +742,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         if stall and n % stall == 0:
-            # a chunk, then nothing - the client's stall watchdog should fire
             self.write_chunk(body[:CHUNK])
             time.sleep(self.station.args.stall_seconds)
             return
         if truncate and n % truncate == 0:
-            # half a body under a full Content-Length, then hang up
-            # no terminating chunk: the body just stops, which is what a
-            # dropped link looks like
             self.write_body(body[: len(body) // 2], last=False)
             return
         self.write_body(body)
 
     def write_body(self, body, last=True):
-        """--rate exists so the byte-level progress and stall paths are
-        observable at all: on localhost a replay arrives in one gulp."""
         rate = self.station.args.rate
         per_chunk = CHUNK / (rate * 1024) if rate else 0
         for i in range(0, len(body), CHUNK):
             self.write_chunk(body[i : i + CHUNK])
             if per_chunk:
                 time.sleep(per_chunk)
-        if last and self.station.args.chunked:
+        if last:
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
 
     def write_chunk(self, piece):
-        if self.station.args.chunked:
-            self.wfile.write(f"{len(piece):x}\r\n".encode())
-            self.wfile.write(piece)
-            self.wfile.write(b"\r\n")
-        else:
-            self.wfile.write(piece)
+        self.wfile.write(f"{len(piece):x}\r\n".encode())
+        self.wfile.write(piece)
+        self.wfile.write(b"\r\n")
         self.wfile.flush()
 
     def do_POST(self):
@@ -753,19 +777,43 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/reset-beamer":
             if self.headers.get("X-Beamer-Confirm") != "reset":
-                self.send_error_json(
-                    400,
-                    "POST /reset-beamer needs the header 'X-Beamer-Confirm: reset'.",
-                )
+                self.send_error_json(400, ERR_CONFIRM)
                 return
-            self.send_json(200, {"ok": True, "message": "reset OK (fake, no-op)"})
+            if self.station.live():
+                self.send_error_json(409, ERR_GAME_LIVE,
+                                     {"Retry-After": RETRY_AFTER_GAME_LIVE})
+                return
+            if self.station.transfer_lock.locked():
+                self.send_error_json(409, ERR_SERVING,
+                                     {"Retry-After": RETRY_AFTER_SERVING})
+                return
+            self.send_json(200, {"ok": True, "message": "reset OK"})
             return
 
         self.send_error_json(404, "no such endpoint")
 
 
+class Announcer:
+    def __init__(self, station, enabled):
+        self.station = station
+        self.enabled = enabled
+        self.seq = 0
+        self.sock = None
+        if enabled:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+
+    def send(self, event):
+        if not self.enabled:
+            return
+        self.seq += 1
+        payload = self.station.announce_payload(event, self.seq)
+        self.sock.sendto(json.dumps(payload).encode(), (ANNOUNCE_GROUP, ANNOUNCE_PORT))
+        print(f"fake_beamer[{self.station.args.port}] announce {event} "
+              f"seq={self.seq} -> {ANNOUNCE_GROUP}:{ANNOUNCE_PORT}", file=sys.stderr)
+
+
 def advertise(name, port):
-    """Register over mDNS using whatever the OS already has."""
     if sys.platform == "darwin":
         cmd = ["dns-sd", "-R", name, "_beamer._tcp", "local", str(port)]
     else:
@@ -778,97 +826,94 @@ def advertise(name, port):
         ]
     if not shutil.which(cmd[0]):
         print(
-            f"fake-beamer: {cmd[0]} not found; serving HTTP but not advertising, "
+            f"fake_beamer: {cmd[0]} not found; serving HTTP but not advertising, "
             f"so the app will not see this station -- its fleet view is "
             f"discovery-only.",
             file=sys.stderr,
         )
         return None
-    print(f"fake-beamer: advertising {name} as _beamer._tcp on {port}")
+    print(f"fake_beamer: advertising {name} as _beamer._tcp on {port}")
     return subprocess.Popen(cmd, stdout=subprocess.DEVNULL)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Pretend to be a Beamer station.")
-    parser.add_argument("--name", default="beamer-fake", help="mDNS instance name")
-    parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--station", default="", help="station uuid (derived if unset)")
-    parser.add_argument("--station-name", default="", help="STATION-NAME value")
-    parser.add_argument("--wifi", default="fake-net")
-    parser.add_argument("--replays", default="", help="directory of .slp to serve")
-    parser.add_argument("--game", default="", help=".slp to report as the current game")
-    parser.add_argument("--served", type=int, default=DEFAULT_SERVED)
-    parser.add_argument(
-        "--cap", type=int, default=DEFAULT_CAP, help="REPLAY-CAP the station reports"
-    )
-    parser.add_argument(
-        "--unhealthy", action="store_true", help='report health "error"'
-    )
-    parser.add_argument(
-        "--warn",
-        default="",
-        help='comma-separated warning labels, e.g. "DRIVE FULL,NO WII"; '
-        'any warning reports result "warn"',
-    )
-    parser.add_argument("--unreported", action="store_true", help="503 on GET /status")
-    parser.add_argument(
-        "--truncate-every",
-        type=int,
-        default=0,
-        metavar="N",
-        help="hang up halfway through every Nth replay request, under a full "
-        "Content-Length - the silent-truncation case",
-    )
-    parser.add_argument(
-        "--stall-every",
-        type=int,
-        default=0,
-        metavar="N",
-        help="send one chunk then go quiet on every Nth replay request, to trip "
-        "the downloader's stall watchdog",
-    )
-    parser.add_argument(
-        "--chunked",
-        action="store_true",
-        help="stream replies chunked with no Content-Length, as the firmware "
-        "does - the shape that actually ships",
-    )
-    parser.add_argument(
-        "--rate",
-        type=float,
-        default=0,
-        metavar="KBPS",
-        help="throttle replay bodies to roughly this many KB/s, standing in "
-        "for a congested venue AP",
-    )
-    parser.add_argument(
-        "--stall-seconds",
-        type=float,
-        default=30.0,
-        help="how long --stall-every holds the connection open",
-    )
-    args = parser.parse_args()
+@click.command(context_settings=beamer.HELP_OPTIONS)
+@click.option("--name", default="beamer-fake", show_default=True,
+              help="mDNS instance name to advertise as.")
+@click.option("--port", type=int, default=8080, show_default=True,
+              help="HTTP port to serve on. Run several on different ports for a fleet.")
+@click.option("--station", default="", help="Station uuid. Derived from --name if unset.")
+@click.option("--station-name", default="", help="STATION-NAME the app displays.")
+@click.option("--wifi", default="fake-net", show_default=True, help="ssid to report.")
+@click.option("--replays", default="", help="Directory of .slp files to serve.")
+@click.option("--game", default="", help=".slp to peek and report as the current game.")
+@click.option("--served", type=int, default=DEFAULT_SERVED, show_default=True,
+              help="How many replays to publish in the served index.")
+@click.option("--cap", type=int, default=DEFAULT_CAP, show_default=True,
+              help="replay_cap the station reports.")
+@click.option("--rssi", type=int, default=FAKE_RSSI, show_default=True,
+              help="rssi to report (dBm). Default is an obviously-fake sentinel.")
+@click.option("--phy-mode", default=FAKE_PHY_MODE, show_default=True,
+              help="phy_mode to report. Default is an obviously-fake sentinel.")
+@click.option("--channel", type=int, default=FAKE_CHANNEL, show_default=True,
+              help="channel to report. Default 0 is an obviously-fake sentinel.")
+@click.option("--unhealthy", is_flag=True, help='Report health "error".')
+@click.option("--warn", default="",
+              help='Comma-separated warning labels, e.g. "DRIVE FULL,NO WII"; '
+                   'any warning reports health "warn".')
+@click.option("--unreported", is_flag=True, help="Answer 503 on GET /status.")
+@click.option("--truncate-every", type=int, default=0, metavar="N",
+              help="Stop the chunked stream mid-body with no terminating chunk on "
+                   "every Nth replay - a dropped-link truncation.")
+@click.option("--stall-every", type=int, default=0, metavar="N",
+              help="Send one chunk then go quiet on every Nth replay, to trip the "
+                   "downloader's stall watchdog.")
+@click.option("--rate", type=float, default=0, metavar="KBPS",
+              help="Throttle replay bodies to roughly this many KB/s, standing in "
+                   "for a congested venue AP.")
+@click.option("--stall-seconds", type=float, default=30.0, show_default=True,
+              help="How long --stall-every holds the connection open.")
+@click.option("--announce/--no-announce", default=True, show_default=True,
+              help="Multicast game_started / game_finished on liveness changes.")
+def main(**opts):
+    args = SimpleNamespace(**opts)
 
     if args.replays and not os.path.isdir(args.replays):
-        parser.error(f"--replays {args.replays} is not a directory")
+        raise click.BadParameter(f"{args.replays} is not a directory", param_hint="--replays")
     if args.game and not os.path.isfile(args.game):
-        parser.error(f"--game {args.game} is not a file")
+        raise click.BadParameter(f"{args.game} is not a file", param_hint="--game")
+
+    beamer.banner("fake_beamer", name=args.name, port=args.port,
+                  station=args.station_name or "(unnamed)")
 
     station = Station(args)
+    announcer = Announcer(station, args.announce)
     handler = type("BoundHandler", (Handler,), {"station": station})
     server = ThreadingHTTPServer(("0.0.0.0", args.port), handler)
     advertiser = advertise(args.name, args.port)
 
     def shutdown(_signum, _frame):
-        print("\nfake-beamer: stopping")
+        print("\nfake_beamer: stopping")
+        if station.live():
+            announcer.send("game_finished")
         if advertiser:
             advertiser.terminate()
         threading.Thread(target=server.shutdown).start()
 
+    def reload_game(_signum, _frame):
+        was_live = station.live()
+        station.set_game(station.read_game())
+        now_live = station.live()
+        if now_live and not was_live:
+            announcer.send("game_started")
+        elif was_live and not now_live:
+            announcer.send("game_finished")
+
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGHUP, reload_game)
 
-    print(f"fake-beamer: http://localhost:{args.port}/status")
+    print(f"fake_beamer: http://localhost:{args.port}/status")
+    announcer.send("game_started")
     try:
         server.serve_forever()
     finally:
