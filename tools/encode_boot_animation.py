@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["click", "pillow"]
+# ///
 """Turn assets/boot_animation/frameNN.png into src/status/boot_animation.bin as 
 big-endian RGB565 frames.
 """
