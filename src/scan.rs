@@ -235,7 +235,7 @@ impl Tracker {
         match peek(&window, &name) {
             Some(game) => {
                 let live = game.live;
-                self.publish_game(&game);
+                self.publish_game(&game, false);
                 if !live {
                     let size = size_of(&window, &name);
                     drop(window);
@@ -375,7 +375,7 @@ impl Tracker {
             };
             if game.live {
                 log::info!("scan: {name} is being written");
-                self.publish_game(&game);
+                self.publish_game(&game, true);
                 self.live = Some(name.clone());
                 self.pending_peek = false;
                 self.ticks_since_peek = 0;
@@ -383,7 +383,7 @@ impl Tracker {
                 finished.clear();
                 break;
             }
-            self.publish_game(&game);
+            self.publish_game(&game, false);
             finished.push((name.clone(), size_of(&window, name), game));
         }
 
@@ -433,14 +433,13 @@ impl Tracker {
         }
     }
 
-    fn publish_game(&mut self, game: &slp::Game) {
+    fn publish_game(&mut self, game: &slp::Game, new_live: bool) {
         GAME_LIVE.store(game.live, Ordering::Relaxed);
         let now = uptime_s();
         let (ports, chars) = (game.port_sig(), game.character_sig());
 
         let mut guard = lock(&FAST);
         let f = guard.get_or_insert_with(report::Fast::new);
-        // rendered straight into the static, never through a stack copy
         game.to_json_into(f.game.get_or_insert_with(report::GameJson::new));
         if self.port_sig != Some(ports) {
             self.port_sig = Some(ports);
@@ -449,6 +448,9 @@ impl Tracker {
         if self.character_sig != Some(chars) {
             self.character_sig = Some(chars);
             f.character_change_at = Some(now);
+        }
+        if new_live {
+            f.game_start_at = Some(now);
         }
     }
 }

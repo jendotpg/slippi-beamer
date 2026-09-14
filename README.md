@@ -7,6 +7,7 @@ I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have c
 1. update tools:
    1. add my stress test to the `tools/` directory (clean it up first LOL it fails sometimes against acceptable lwip ooms)
    2. get `fake-beamer.py`, which is basically identical since the old raspi version, updated to current project standards: rename to`fake_beamer.py`, port it to click, make sure its cleaned up
+2. make `Retry-After`a fair guess instead of a flat 15seconds
 
 ## Hardware
 
@@ -286,6 +287,7 @@ Everything here is cached by the scan tick so this `GET` is very cheap - **it's 
   },  # game is null until a game has been started
   "secs_since_port_change": null, # how long have just these ports been in use
   "secs_since_character_change": null, # how long has this ports+characters combo been in use
+  "secs_since_game_start": null, # how many seconds since the last game start
   "health": "ok", # ok, starting, warn, or errror
   "warnings": []
   # note the lack of "errors" array - "health": "error" says you gotta walk up to the beamer anyway!

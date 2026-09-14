@@ -441,15 +441,19 @@ class Station:
         self.character_sig = None
         self.port_change_at = None
         self.character_change_at = None
+        self.game_start_at = None
         self.game = None
         self.set_game(self.read_game())
 
     def set_game(self, game):
         """What publish_game does: stamp the clocks when a signature changes."""
+        was_live = self.game is not None and self.game["live"]
         self.game = game
         if game is None:
             return
         now = time.monotonic()
+        if game["live"] and not was_live:
+            self.game_start_at = now
         ports, chars = port_sig(game), character_sig(game)
         if self.port_sig != ports:
             self.port_sig = ports
@@ -495,6 +499,7 @@ class Station:
             now = time.monotonic()
             since_ports = secs_since(self.port_change_at, now)
             since_chars = secs_since(self.character_change_at, now)
+            since_game = secs_since(self.game_start_at, now)
         return {
             "schema": SCHEMA,
             "arch": "fake",
@@ -508,6 +513,7 @@ class Station:
             "game": game,
             "secs_since_port_change": since_ports,
             "secs_since_character_change": since_chars,
+            "secs_since_game_start": since_game,
             "health": self.health(),
             "warnings": self.warnings(),
         }

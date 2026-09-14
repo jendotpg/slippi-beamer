@@ -106,6 +106,7 @@ pub struct Fast {
     pub game: Option<GameJson>,
     pub port_change_at: Option<u64>,
     pub character_change_at: Option<u64>,
+    pub game_start_at: Option<u64>,
 }
 
 impl Fast {
@@ -115,6 +116,7 @@ impl Fast {
             game: None,
             port_change_at: None,
             character_change_at: None,
+            game_start_at: None,
         }
     }
 }
@@ -189,6 +191,7 @@ pub fn status_json(
         fast.character_change_at,
         now_s,
     );
+    line_secs_since(s, "secs_since_game_start", fast.game_start_at, now_s);
     line_str(s, "health", Some(health.as_str()));
 
     s.push_str("  \"warnings\": ");
