@@ -436,6 +436,11 @@ class Station:
         self.character_change_at = None
         self.game_start_at = None
         self.game = None
+        self.deferred_name = None
+        if args.ended_delay > 0:
+            served = self._all_replay_names()
+            if served:
+                self.deferred_name = sorted(served)[0]
         self.set_game(self.read_game())
 
     def live(self):
@@ -473,7 +478,7 @@ class Station:
             print(f"fake_beamer: {self.args.game}: {e}", file=sys.stderr)
             return None
 
-    def replays(self):
+    def _all_replay_names(self):
         if not self.args.replays:
             return []
         try:
@@ -486,6 +491,17 @@ class Station:
             return []
         names.sort(reverse=True)
         return names[: self.args.served]
+
+    def replays(self):
+        names = self._all_replay_names()
+        if self.deferred_name in names:
+            names.remove(self.deferred_name)
+        return names
+
+    def release_deferred(self):
+        name = self.deferred_name
+        self.deferred_name = None
+        return name
 
     def status(self):
         with self.lock:
@@ -516,11 +532,14 @@ class Station:
             "warnings": self.warnings(),
         }
 
-    def announce_payload(self, event, seq):
+    def announce_payload(self, event, seq, replay_name=None):
         replay = None
-        names = self.replays()
-        if names:
-            name = names[0]
+        name = replay_name
+        if name is None:
+            names = self.replays()
+            if names:
+                name = names[0]
+        if name:
             try:
                 size = os.path.getsize(os.path.join(self.args.replays, name))
                 replay = {"name": name, "size": size, "url": f"/SLIPPI/{name}"}
@@ -683,6 +702,9 @@ class Handler(BaseHTTPRequestHandler):
         if not os.path.isfile(full):
             self.send_error_json(404, ERR_NOT_FOUND)
             return
+        if name == self.station.deferred_name:
+            self.send_error_json(404, ERR_NOT_FOUND)
+            return
 
         if not self.station.transfer_lock.acquire(blocking=False): # one at a time, just like firmware
             self.send_error_json(503, ERR_SERVING, {"Retry-After": RETRY_AFTER_SERVING})
@@ -803,11 +825,11 @@ class Announcer:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
 
-    def send(self, event):
+    def send(self, event, replay_name=None):
         if not self.enabled:
             return
         self.seq += 1
-        payload = self.station.announce_payload(event, self.seq)
+        payload = self.station.announce_payload(event, self.seq, replay_name)
         self.sock.sendto(json.dumps(payload).encode(), (ANNOUNCE_GROUP, ANNOUNCE_PORT))
         print(f"fake_beamer[{self.station.args.port}] announce {event} "
               f"seq={self.seq} -> {ANNOUNCE_GROUP}:{ANNOUNCE_PORT}", file=sys.stderr)
@@ -874,6 +896,9 @@ def advertise(name, port):
               help="How long --stall-every holds the connection open.")
 @click.option("--announce/--no-announce", default=True, show_default=True,
               help="Multicast game_started / game_finished on liveness changes.")
+@click.option("--ended-delay", type=float, default=0.0, show_default=True, metavar="SECONDS",
+              help="Announce game_finished this many seconds after startup, releasing the "
+                   "held-back replay in the same instant.")
 def main(**opts):
     args = SimpleNamespace(**opts)
 
@@ -914,6 +939,15 @@ def main(**opts):
 
     print(f"fake_beamer: http://localhost:{args.port}/status")
     announcer.send("game_started")
+
+    if args.ended_delay > 0 and station.deferred_name is not None:
+        def end_game():
+            time.sleep(args.ended_delay)
+            name = station.release_deferred()
+            announcer.send("game_finished", replay_name=name)
+
+        threading.Thread(target=end_game, daemon=True).start()
+
     try:
         server.serve_forever()
     finally:

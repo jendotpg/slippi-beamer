@@ -1,6 +1,6 @@
 # Slippi Beamer
 
-I currently have ONE working raspi beamer and ONE working ESP32 beamer. I have confirmed both can report sets succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi) (although the raspi firmware is now quite out of date...)
+I currently have a fleet of working ESP32 beamers. I have confirmed they can report sets succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi). Tournament proof is coming shortly :)
 
 ## Hardware
 
@@ -335,7 +335,7 @@ Everything a beamer application sees is an mDNS advertisement, the HTTP endpoint
 tools/fake_beamer.py --name beamer-stream-1 --port 8081 --replays ~/slp/stream1 --game ~/slp/live.slp
 ```
 
-`--game` is peeked out of a real `.slp`. Run several on different ports to simulate a fleet. Like a real station, it serves one replay at a time (a second concurrent download gets `503`) and streams chunked with no `Content-Length`. `game_started` is broadcast on startup - send `SIGHUP` (Ctrl-C :P) to broadcast the `game_finished` event.
+`--game` is peeked out of a real `.slp`. Run several on different ports to simulate a fleet. Like a real station, it serves one replay at a time (a second concurrent download gets `503`) and streams chunked with no `Content-Length`. `game_started` is broadcast on startup. `--ended-delay N` withholds the first-alphabetical replay from the served index then broadcasts `game_finished` broadcast N seconds after startup.
 
 ## Beamer firmware
 
