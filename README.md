@@ -317,6 +317,7 @@ A few notes:
 - Accepts `Accept-Encoding: gzip` (body comes back `Content-Encoding: gzip` with no `Content-Length`)
 - `X-Replay-From: <n>` is the gzipped resume path. `n` counts uncompressed bytes. Answers `200` with `X-Replay-From` in the return header.
 - `Range` answers `206` and is the uncompressed resume path. Gzip and `Range`are mutually exclusive - `Range`wins when both are present.
+- Connection is closed as soon the response completes - this endpoint does not keep-alive, so sequential replay downloads should each be fetched on a fresh connection.
 
 ### API Odds and ends
 

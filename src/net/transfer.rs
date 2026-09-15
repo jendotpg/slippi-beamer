@@ -1,5 +1,5 @@
-use std::ffi::{c_char, c_void, CStr};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::ffi::{c_char, c_int, c_void, CStr};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use esp_idf_svc::hal::cpu::Core;
@@ -7,10 +7,10 @@ use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_svc::handle::RawHandle;
 use esp_idf_svc::http::server::EspHttpServer;
 use esp_idf_svc::sys::{
-    esp_err_t, httpd_register_uri_handler, httpd_req_async_handler_begin,
+    esp_err_t, httpd_handle_t, httpd_register_uri_handler, httpd_req_async_handler_begin,
     httpd_req_async_handler_complete, httpd_req_get_hdr_value_len, httpd_req_get_hdr_value_str,
-    httpd_req_t, httpd_resp_send, httpd_resp_send_chunk, httpd_resp_set_hdr, httpd_resp_set_status,
-    httpd_resp_set_type, httpd_uri_t, ESP_OK,
+    httpd_req_t, httpd_req_to_sockfd, httpd_resp_send, httpd_resp_send_chunk, httpd_resp_set_hdr,
+    httpd_resp_set_status, httpd_resp_set_type, httpd_sess_trigger_close, httpd_uri_t, ESP_OK,
 };
 
 use crate::scan;
@@ -41,6 +41,14 @@ static WAKE: Condvar = Condvar::new();
 static STOP: AtomicBool = AtomicBool::new(false);
 
 static BUSY: AtomicBool = AtomicBool::new(false);
+static SERVER_HANDLE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+fn close_async_session(fd: c_int) {
+    let handle: httpd_handle_t = SERVER_HANDLE.load(Ordering::Acquire);
+    if !handle.is_null() && fd >= 0 {
+        unsafe { httpd_sess_trigger_close(handle, fd) };
+    }
+}
 
 pub fn spawn(card: Arc<SdCard>) -> anyhow::Result<std::thread::JoinHandle<()>> {
     STOP.store(false, Ordering::SeqCst);
@@ -91,7 +99,9 @@ fn worker(card: Arc<SdCard>) {
         if let Err(e) = run(&card, &job) {
             log::error!("{}: transfer failed: {e}", job.name);
         }
+        let fd = unsafe { httpd_req_to_sockfd(raw) };
         unsafe { httpd_req_async_handler_complete(raw) };
+        close_async_session(fd);
         drop(job);
         BUSY.store(false, Ordering::SeqCst);
     }
@@ -451,12 +461,15 @@ unsafe extern "C" fn handle(r: *mut httpd_req_t) -> esp_err_t {
         let late = RawResponse(async_req);
         retry_after(&late);
         late.send(S_503, H_JSON, http::ERR_SERVING);
+        let fd = httpd_req_to_sockfd(async_req);
         httpd_req_async_handler_complete(async_req);
+        close_async_session(fd);
     }
     ESP_OK
 }
 
 pub fn register(server: &EspHttpServer<'static>) -> anyhow::Result<()> {
+    SERVER_HANDLE.store(server.handle() as *mut c_void, Ordering::Release);
     let uri = c"/SLIPPI/*";
     let cfg = httpd_uri_t {
         uri: uri.as_ptr(),
