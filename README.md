@@ -335,7 +335,7 @@ Everything a beamer application sees is an mDNS advertisement, the HTTP endpoint
 tools/fake_beamer.py --name beamer-stream-1 --port 8081 --replays ~/slp/stream1 --game ~/slp/live.slp
 ```
 
-`--game` is peeked out of a real `.slp`. Run several on different ports to simulate a fleet. Like a real station, it serves one replay at a time (a second concurrent download gets `503`) and streams chunked with no `Content-Length`. `game_started` is broadcast on startup. `--ended-delay N` withholds the first-alphabetical replay from the served index then broadcasts `game_finished` broadcast N seconds after startup.
+`--game` is peeked out of a real `.slp`. Run several on different ports to simulate a fleet. Each fake generates a random station uuid at startup (pass `--station <uuid>` to pin one, if you want). Like a real station, it serves one replay at a time (a second concurrent download gets `503`) and streams chunked with no `Content-Length`. `game_started` is broadcast on startup. `--ended-delay N` withholds the first-alphabetical replay from the served index then broadcasts `game_finished` broadcast N seconds after startup.
 
 ## Beamer firmware
 

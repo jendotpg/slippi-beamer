@@ -425,7 +425,7 @@ def character_sig(game):
 class Station:
     def __init__(self, args):
         self.args = args
-        self.station_id = args.station or str(uuid.uuid5(uuid.NAMESPACE_DNS, args.name))
+        self.station_id = args.station or str(uuid.uuid4())
         self.station_name = args.station_name or ""
         self.lock = threading.Lock() # safe "set_game" call
         self.transfer_lock = threading.Lock()
@@ -859,11 +859,12 @@ def advertise(name, port):
 
 
 @click.command(context_settings=beamer.HELP_OPTIONS)
-@click.option("--name", default="beamer-fake", show_default=True,
-              help="mDNS instance name to advertise as.")
+@click.option("--name", default="", show_default=True,
+              help="mDNS instance name to advertise as. Defaults to --station-name, "
+                   "or beamer-fake.")
 @click.option("--port", type=int, default=8080, show_default=True,
               help="HTTP port to serve on. Run several on different ports for a fleet.")
-@click.option("--station", default="", help="Station uuid. Derived from --name if unset.")
+@click.option("--station", default="", help="Station uuid. Random per run if unset.")
 @click.option("--station-name", default="", help="STATION-NAME the app displays.")
 @click.option("--wifi", default="fake-net", show_default=True, help="ssid to report.")
 @click.option("--replays", default="", help="Directory of .slp files to serve.")
@@ -901,6 +902,8 @@ def advertise(name, port):
                    "held-back replay in the same instant.")
 def main(**opts):
     args = SimpleNamespace(**opts)
+
+    args.name = args.name or args.station_name or "beamer-fake"
 
     if args.replays and not os.path.isdir(args.replays):
         raise click.BadParameter(f"{args.replays} is not a directory", param_hint="--replays")
