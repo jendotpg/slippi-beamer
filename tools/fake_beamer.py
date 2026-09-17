@@ -426,7 +426,7 @@ class Station:
     def __init__(self, args):
         self.args = args
         self.station_id = args.station or str(uuid.uuid4())
-        self.station_name = args.station_name or ""
+        self.station_name = args.station_name or self.station_id
         self.lock = threading.Lock() # safe "set_game" call
         self.transfer_lock = threading.Lock()
         self.replay_requests = 0
@@ -865,7 +865,9 @@ def advertise(name, port):
 @click.option("--port", type=int, default=8080, show_default=True,
               help="HTTP port to serve on. Run several on different ports for a fleet.")
 @click.option("--station", default="", help="Station uuid. Random per run if unset.")
-@click.option("--station-name", default="", help="STATION-NAME the app displays.")
+@click.option("--station-name", default="", show_default=True,
+              help="STATION-NAME the app displays; like the firmware, falls back "
+                   "to the station id when unset.")
 @click.option("--wifi", default="fake-net", show_default=True, help="ssid to report.")
 @click.option("--replays", default="", help="Directory of .slp files to serve.")
 @click.option("--game", default="", help=".slp to peek and report as the current game.")

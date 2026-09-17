@@ -1,6 +1,13 @@
 # Slippi Beamer
 
-I currently have a fleet of working ESP32 beamers. I have confirmed they can report sets succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi). Tournament proof is coming shortly :)
+I currently have a fleet of working ESP32 beamers. I have confirmed they can report sets succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi).
+
+## TODO
+
+- FEATURE REQUEST: change "station name" semantics - don't set in config, set with button!
+  - start at station 1, click button to bump by one
+  - hold button for 2 seconds to lower by one
+- BUGFIX: flip default "upside down" direction
 
 ## Hardware
 
@@ -248,7 +255,7 @@ Everything here is cached by the scan tick so this `GET` is very cheap - **it's 
   "arch": "esp32",
   "firmware_version": "v0.2.2",
   "station_id": "3f2a...", # beamer uuid against factory mac address
-  "station_name": "stream station 2",
+  "station_name": "stream station 2", # guaranteed not to be blank
   "ssid": "nycmelee",
   "rssi": -58,
   "phy_mode": "HT20",
