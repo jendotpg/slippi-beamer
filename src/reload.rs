@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::{ConfigError, Outcome, ReadError, Settings};
 use crate::errors::{self, Target};
-use crate::net::{self, check, NetResult, Plan};
+use crate::net::{self, NetResult, Plan};
 use crate::scan;
 use crate::status::{self, ErrorLabel};
 use crate::storage::fat::ReadWindow;
@@ -167,14 +167,6 @@ impl Watcher {
                 plan.hostname,
             );
             net::reconfigure(plan.clone());
-        } else if plan.station_name != self.plan.station_name {
-            log::info!("reload: station name is now {:?}", plan.station_name);
-            status::set_name(&plan.station_name);
-            check::set(check::Identity {
-                station: plan.station.clone(),
-                station_name: plan.station_name.clone(),
-                ssid: plan.join.as_ref().map(|j| j.ssid.clone()),
-            });
         }
         self.plan = plan;
 

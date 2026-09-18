@@ -2,7 +2,6 @@ use core::fmt;
 
 pub const KEEP_DEFAULT: u8 = 10;
 pub const KEEP_MAX: u8 = 16;
-pub const STATION_NAME_MAX: usize = 63;
 pub const SSID_MAX_BYTES: usize = 32;
 pub const PSK_MIN: usize = 8;
 pub const PSK_MAX: usize = 63;
@@ -120,9 +119,6 @@ str_newtype! {
 str_newtype! {
     Country
 }
-str_newtype! {
-    StationName
-}
 
 impl Ssid {
     pub fn new(s: &str) -> Result<Self, ConfigError> {
@@ -159,25 +155,6 @@ impl Country {
             ));
         }
         Ok(Country(s.to_ascii_uppercase()))
-    }
-}
-
-impl StationName {
-    pub fn new(s: &str) -> Result<Self, ConfigError> {
-        let len = s.chars().count();
-        if len > STATION_NAME_MAX {
-            return Err(ConfigError::new(
-                format!("STATION-NAME is {len} characters; the maximum is {STATION_NAME_MAX}."),
-                "Shorten it in CONFIG/config.txt.",
-            ));
-        }
-        if s.chars().any(char::is_control) {
-            return Err(ConfigError::new(
-                "STATION-NAME contains a control character, which cannot be stored.",
-                "Remove it in CONFIG/config.txt.",
-            ));
-        }
-        Ok(StationName(s.to_owned()))
     }
 }
 
@@ -315,7 +292,6 @@ pub enum Network {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     network: Network,
-    station_name: Option<StationName>,
     num_replays: ReplayCount,
     replay_cap: ReplayCap,
     led_brightness: LedBrightness,
@@ -326,10 +302,6 @@ pub struct Config {
 impl Config {
     pub fn network(&self) -> &Network {
         &self.network
-    }
-
-    pub fn station_name(&self) -> Option<&StationName> {
-        self.station_name.as_ref()
     }
 
     pub fn num_replays(&self) -> u8 {
@@ -352,16 +324,10 @@ impl Config {
         self.debug
     }
 
-    pub fn display_name<'a>(&'a self, station_id: &'a str) -> &'a str {
-        self.station_name
-            .as_ref()
-            .map_or(station_id, StationName::as_str)
-    }
-
     pub fn hostname(&self, station_id: &str) -> String {
-        let mut slug = hostname_slug(self.display_name(station_id));
+        let mut slug = hostname_slug(station_id);
         if slug.is_empty() {
-            slug = hostname_slug(station_id);
+            slug = station_id.to_string();
         }
         format!("beamer-{slug}")
     }
@@ -369,17 +335,6 @@ impl Config {
     pub fn parse(src: &str) -> Result<Config, Vec<ConfigError>> {
         let raw = Raw::scan(src);
         let mut errors = Vec::new();
-
-        let station_name = match raw.station_name.as_deref() {
-            None | Some("") => None,
-            Some(s) => match StationName::new(s) {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    errors.push(e);
-                    None
-                }
-            },
-        };
 
         let num_replays = match raw.num_replays.as_deref() {
             None | Some("") => ReplayCount::default(),
@@ -480,7 +435,6 @@ impl Config {
 
         Ok(Config {
             network,
-            station_name,
             num_replays,
             replay_cap,
             led_brightness,
@@ -559,7 +513,6 @@ struct Raw {
     password: Option<String>,
     country: Option<String>,
     hidden: Option<String>,
-    station_name: Option<String>,
     num_replays: Option<String>,
     replay_cap: Option<String>,
     led_brightness: Option<String>,
@@ -588,7 +541,6 @@ impl Raw {
                 "PASSWORD" => raw.password = Some(value),
                 "COUNTRY" => raw.country = Some(value),
                 "HIDDEN" => raw.hidden = Some(value),
-                "STATION-NAME" | "STATION_NAME" => raw.station_name = Some(value),
                 "NUM-REPLAYS-SERVED" | "NUM_REPLAYS_SERVED" => raw.num_replays = Some(value),
                 "REPLAY-CAP" | "REPLAY_CAP" => raw.replay_cap = Some(value),
                 "LED-BRIGHTNESS" | "LED_BRIGHTNESS" => raw.led_brightness = Some(value),

@@ -14,7 +14,7 @@ use crate::station::StationId;
 use crate::status::{self, ErrorLabel, LcdPins, LedPins, Pins, State, WarningLabel};
 use crate::storage::fat::{WriteWindow, BASE_PATH};
 use crate::storage::{self, volume, Partition, SdCard};
-use crate::{net, reload, scan, station, warnings};
+use crate::{name, net, reload, scan, station, warnings};
 
 pub fn run() -> anyhow::Result<()> {
     // --- Set up process --------------------------------------------------
@@ -69,7 +69,7 @@ pub fn run() -> anyhow::Result<()> {
         ),
     };
     log::info!("station {id}");
-    status::set_name(&id.to_string());
+    name::reset();
 
     report_previous_boot();
     journal::report_previous();
@@ -677,8 +677,8 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
     match &outcome {
         Outcome::Applied(cfg) => {
             log::info!(
-                "config: accepted, station-name {:?}, {} replays served, hostname {}",
-                cfg.display_name(&station_id),
+                "config: accepted, station {}, {} replays served, hostname {}",
+                station_id,
                 cfg.num_replays(),
                 cfg.hostname(&station_id),
             );
@@ -688,7 +688,6 @@ fn write_window(sd: &SdCard, id: &StationId) -> Outcome {
                 cfg.led_brightness().get(),
                 cfg.debug(),
             );
-            status::set_name(cfg.display_name(&station_id));
         }
         Outcome::Rejected(problems) => {
             log::error!(
@@ -780,17 +779,13 @@ const CONFIG_TEMPLATE: &str = "\
 #                    network; otherwise it is 8-63 characters.
 # COUNTRY            two-letter regulatory domain: US, CA, JP, GB...
 # HIDDEN             true or false - whether the network broadcasts its name.
-# STATION-NAME       what to call this station, on the status file and over the
-#                    network. Blank means use the station's ID.
 # NUM-REPLAYS-SERVED how many of the newest replays this station hands out over
 #                    HTTP. 1 to 16.
 # REPLAY-CAP         how many replays this station counts on the card before it
 #                    stops counting. 1 to 512.
 # LED-BRIGHTNESS     0 to 100 percent. 0 turns the status LED off completely -
 #                    the screen then becomes the only readout.
-# FLIP-SCREEN        true or false - whether the screen starts rotated 180
-#                    degrees, for a Wii the Beamer plugs into upside down. The
-#                    button on the side flips it either way at any time.
+# FLIP-SCREEN        true or false - whether the screen is upside down.
 # DEBUG              true or false - whether to keep a LOGS/debug_N.txt of each
 #                    boot. Off by default. These files are never deleted.
 
@@ -798,7 +793,6 @@ SSID=
 PASSWORD=
 COUNTRY=US
 HIDDEN=false
-STATION-NAME=
 NUM-REPLAYS-SERVED=10
 REPLAY-CAP=512
 LED-BRIGHTNESS=20

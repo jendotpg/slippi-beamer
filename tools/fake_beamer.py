@@ -866,8 +866,8 @@ def advertise(name, port):
               help="HTTP port to serve on. Run several on different ports for a fleet.")
 @click.option("--station", default="", help="Station uuid. Random per run if unset.")
 @click.option("--station-name", default="", show_default=True,
-              help="STATION-NAME the app displays; like the firmware, falls back "
-                   "to the station id when unset.")
+              help="Station name the app displays; a real station sets this with "
+                   "its button. Falls back to the station id when unset.")
 @click.option("--wifi", default="fake-net", show_default=True, help="ssid to report.")
 @click.option("--replays", default="", help="Directory of .slp files to serve.")
 @click.option("--game", default="", help=".slp to peek and report as the current game.")

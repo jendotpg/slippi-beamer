@@ -2,12 +2,21 @@
 
 I currently have a fleet of working ESP32 beamers. I have confirmed they can report sets succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi).
 
-## TODO
+## Configuring a station
 
-- FEATURE REQUEST: change "station name" semantics - don't set in config, set with button!
-  - start at station 1, click button to bump by one
-  - hold button for 2 seconds to lower by one
-- BUGFIX: flip default "upside down" direction
+Station number is set with the button on the beamer - clicking goes up and, if you overshoot, holding the button will go down. Other configuration (most importantly wifi info) is set by editing `CONFIG/config.txt`. Keys are case-insensitive, blank lines and `#` comments are ignored, and values may be quoted.
+
+| Key                  | Default | What it does                                                                                                                                              |
+| -------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SSID`               | blank   | The network to join.                                                                                                                                      |
+| `PASSWORD`           | blank   | 8–63 characters. Blank means an open network.                                                                                                             |
+| `COUNTRY`            | `US`    | Two-letter regulatory domain:`US`, `CA`, `JP`, `GB`...                                                                                                    |
+| `HIDDEN`             | `false` | Whether the network broadcasts its name.                                                                                                                  |
+| `NUM-REPLAYS-SERVED` | `10`    | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                  |
+| `REPLAY-CAP`         | `512`   | How many replays the station counts on the card before it stops counting. 1 to 512. Past 75% it warns; at the cap it warns and stops serving new replays. |
+| `LED-BRIGHTNESS`     | `20`    | The status LED, 0 to 100 percent.                                                                                                                         |
+| `FLIP-SCREEN`        | `false` | Whether the screen starts upside down. If you stand your Wii up, you probably want this.                                                                  |
+| `DEBUG`              | `false` | Debug mode. Don't use this unless you know what you're doing.                                                                                             |
 
 ## Hardware
 
@@ -26,26 +35,9 @@ I currently have a fleet of working ESP32 beamers. I have confirmed they can rep
    2. This only works on Chrome, sorry. If you don't want to install Chrome, you can flash using `espup`or `cargo` - see [firmware build](#build)
 
 4. Unplug and replug the dongle to leave download mode. The first boot derives the station identity and lays down `CONFIG/` and `LOGS/`
-5. Fill in `CONFIG/config.txt` with SSID, Password, and Station Name.
+5. Fill in `CONFIG/config.txt` with SSID and Password.
    1. See [Configuring a station](#configuring-a-station) for more details on this file.
-   2. Watch the screen/LED. If it goes green and shows the station name your Beamer is working and ready to go! Otherwise, you probably entered the wifi wrong. This will look like about fifteen seconds of booting followed by a screen that says "WIFI ISSUE". Other errors will also show on screen - just read it and consult the [error list](#error-labels) or [warning list](#warning-labels)
-
-## Configuring a station
-
-You can configure a Beamer by editing`CONFIG/config.txt`. It's read in full at boot and again after any edit. Keys are case-insensitive, blank lines and `#` comments are ignored, and values may be quoted. Config files larger than 4kb are rejected.
-
-| Key                  | Default        | What it does                                                                                                                                              |
-| -------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SSID`               | blank          | The network to join.                                                                                                                                      |
-| `PASSWORD`           | blank          | 8–63 characters. Blank means an open network.                                                                                                             |
-| `COUNTRY`            | `US`           | Two-letter regulatory domain:`US`, `CA`, `JP`, `GB`...                                                                                                    |
-| `HIDDEN`             | `false`        | Whether the network broadcasts its name.                                                                                                                  |
-| `STATION-NAME`       | the station ID | What to call this station. Appears as`station_name` in `GET /status` and as the station's hostname.                                                       |
-| `NUM-REPLAYS-SERVED` | `10`           | How many of the newest replays the station hands out over HTTP. 1 to 16.                                                                                  |
-| `REPLAY-CAP`         | `512`          | How many replays the station counts on the card before it stops counting. 1 to 512. Past 75% it warns; at the cap it warns and stops serving new replays. |
-| `LED-BRIGHTNESS`     | `20`           | The status LED, 0 to 100 percent.                                                                                                                         |
-| `FLIP-SCREEN`        | `false`        | Whether the screen starts rotated 180 degrees. The button on the side of the dongle flips it either way at any time.                                      |
-| `DEBUG`              | `false`        | Debug mode. Don't use this unless you know what you're doing.                                                                                             |
+   2. Watch the screen/LED. If it goes green and shows Station 1 your Beamer is working and ready to go! Otherwise, you probably entered the wifi wrong. This will look like about fifteen seconds of booting followed by a screen that says "WIFI ISSUE". Other errors will also show on screen - just read it and consult the [error list](#error-labels) or [warning list](#warning-labels)
 
 ## Networking
 
@@ -216,7 +208,7 @@ Whenever a game starts or finsihes a beamer will send a single UDP datagram to `
   "schema": 1,
   "event": "game_finished",
   "station_id": "3f2a...",
-  "station_name": "stream station 2",
+  "station_name": "Station 2",
   "seq": 7,
   "replay": {
     "name": "Game_20260814T181203.slp",
@@ -234,7 +226,7 @@ Whenever a game starts or finsihes a beamer will send a single UDP datagram to `
   "schema": 1,
   "event": "game_finished",
   "station_id": "3f2a...",
-  "station_name": "stream station 2",
+  "station_name": "Station 2",
   "seq": 8,
   "replay": {
     "name": "Game_20260814T181203.slp",
@@ -255,7 +247,7 @@ Everything here is cached by the scan tick so this `GET` is very cheap - **it's 
   "arch": "esp32",
   "firmware_version": "v0.2.2",
   "station_id": "3f2a...", # beamer uuid against factory mac address
-  "station_name": "stream station 2", # guaranteed not to be blank
+  "station_name": "Station 2",
   "ssid": "nycmelee",
   "rssi": -58,
   "phy_mode": "HT20",
@@ -527,6 +519,4 @@ I really make an effort to keep this table up to date - it's not trivially self 
 
 #### Station Identity
 
-Each board assigns itself a `station_id` at first boot: a UUIDv5 over the chip's factory-programmed base MAC (hashed as lowercase colonless hex) against a fixed project namespace. Reflashing a board thus keeps the same `station_id`.
-
-The hostname comes from `STATION-NAME`, which itself comes from`config.txt`. The hostname is slugged and `beamer-` is prefixed to it. `Stream Station 2` becomes `beamer-stream-station-2`. Some names don't slug clenly and fall back to `station_id`. For example,`STATION-NAME=拉拉`is a perfectly valid station name and works great with`GET /status`- but it would slug empty, so that station's hostname is `beamer-$UUID`. Nothing enforces hostname or `STATION-name` uniqueness: two stations named `Setup 2`claim the same hostname the same way two hosts on any network would. The `station_id` stays unique and can be used to distinguish them application-side.
+Each board assigns itself a `station_id` at first boot: a UUIDv5 over the chip's factory-programmed base MAC (hashed as lowercase colonless hex) against a fixed project namespace. Reflashing a board thus keeps the same `station_id`. The hostname is derived from the `station_id`, slugged and with `beamer-` prefixed.

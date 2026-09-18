@@ -140,7 +140,6 @@ pub struct Plan {
     pub join: Option<wifi::Join>,
     pub hostname: String,
     pub station: String,
-    pub station_name: String,
 }
 
 impl Plan {
@@ -165,13 +164,11 @@ impl Plan {
                 },
                 hostname: cfg.hostname(station_id),
                 station: station_id.to_owned(),
-                station_name: cfg.display_name(station_id).to_owned(),
             },
             Outcome::Rejected(_) | Outcome::Unreadable(_) => Plan {
                 join: None,
                 hostname: format!("beamer-{}", crate::config::hostname_slug(station_id)),
                 station: station_id.to_owned(),
-                station_name: station_id.to_owned(),
             },
         }
     }
@@ -266,11 +263,11 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
 
     check::set(check::Identity {
         station: plan.station.clone(),
-        station_name: plan.station_name.clone(),
+        station_name: crate::name::current(),
         ssid: Some(join.ssid.clone()),
     });
 
-    announce::open(&plan.station, &plan.station_name);
+    announce::open(&plan.station, &crate::name::current());
 
     if server.is_none() {
         set_result(NetResult::Fail);
@@ -307,11 +304,9 @@ fn run(modem: Modem<'static>, nvs: EspDefaultNvsPartition, sd: Arc<SdCard>, plan
 
             check::set(check::Identity {
                 station: next.station,
-                station_name: next.station_name.clone(),
+                station_name: crate::name::current(),
                 ssid: Some(join.ssid),
             });
-            announce::set_name(&next.station_name);
-            crate::status::set_name(&next.station_name);
             since_tick = Duration::ZERO;
             log::info!("net: re-applied config -- http://{hostname}.local/");
             continue;

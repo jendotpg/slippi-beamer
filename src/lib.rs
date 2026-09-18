@@ -8,6 +8,7 @@ pub mod text;
 mod boot;
 mod errors;
 mod journal;
+mod name;
 mod net;
 mod panic;
 mod reload;

@@ -123,10 +123,6 @@ pub fn set_flipped(flipped: bool) {
     FLIPPED.store(flipped, Ordering::Relaxed);
 }
 
-pub fn toggle_flipped() {
-    FLIPPED.fetch_xor(true, Ordering::Relaxed);
-}
-
 pub fn set_name(name: &str) {
     publish(|d| {
         d.name.clear();
@@ -172,6 +168,8 @@ pub(crate) fn set_warning(warn: Option<WarningLabel>, more: u32) {
 const TICK: Duration = Duration::from_millis(20);
 const BUSY_HALF_MS: u64 = 500; // ~1 Hz
 const DEBOUNCE_TICKS: u8 = 3; // 60 ms at TICK
+const HOLD_MS: u64 = 3000;
+const HOLD_STEP_MS: u64 = 1000;
 
 pub const SPINNER_STEPS: u64 = 12;
 const BOOT_MS_PER_FRAME: u64 = 100;
@@ -212,19 +210,19 @@ impl<'d> Button<'d> {
         })
     }
 
-    fn pressed(&mut self) -> bool {
+    fn event(&mut self) -> Option<bool> {
         let now = self.pin.is_high();
         if now == self.level {
             self.pending = 0;
-            return false;
+            return None;
         }
         self.pending += 1;
         if self.pending < DEBOUNCE_TICKS {
-            return false;
+            return None;
         }
         self.pending = 0;
         self.level = now;
-        !now
+        Some(!now)
     }
 }
 
@@ -295,7 +293,7 @@ fn render(pins: Pins) {
     let mut button = match Button::new(pins.button) {
         Ok(button) => Some(button),
         Err(e) => {
-            log::warn!("button unavailable, screen cannot be flipped by hand: {e}");
+            log::warn!("button unavailable, the station number cannot be changed by hand: {e}");
             None
         }
     };
@@ -306,6 +304,7 @@ fn render(pins: Pins) {
     let mut last_state: Option<State> = None;
     let mut last_gen = u32::MAX;
     let mut last_frame = u64::MAX;
+    let mut press: Option<(Instant, u64)> = None;
 
     loop {
         let ms = start.elapsed().as_millis() as u64;
@@ -320,8 +319,25 @@ fn render(pins: Pins) {
             );
         }
 
-        if button.as_mut().is_some_and(Button::pressed) {
-            toggle_flipped();
+        if let Some(button) = button.as_mut() {
+            match button.event() {
+                Some(true) => press = Some((Instant::now(), HOLD_MS)),
+                Some(false) => {
+                    if let Some((started, _)) = press.take() {
+                        if (started.elapsed().as_millis() as u64) < HOLD_MS {
+                            crate::name::bump();
+                        }
+                    }
+                }
+                None => {}
+            }
+
+            if let Some((started, next)) = press.as_mut() {
+                if (started.elapsed().as_millis() as u64) >= *next {
+                    crate::name::lower();
+                    *next += HOLD_STEP_MS;
+                }
+            }
         }
 
         if let Some(lcd) = panel.as_mut() {
