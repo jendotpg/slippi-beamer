@@ -2,6 +2,15 @@
 
 I currently have a fleet of working ESP32 beamers. I have confirmed they can report sets succesfully with [my fork of replay reporter](https://github.com/jendotpg/replay-manager-for-slippi).
 
+TODO:
+
+- this should be a "Beamer for Dummies" doc - TO can read it and know exactly how to get their tournament on beamer.
+- BUGFIX: check up on what happens when a UDP packet fails to send...
+- move networking info into an "advanced networking" doc
+- move api / testing into a "for application developers" doc
+- move firmware details into a "firmware details" doc
+- add a "Why not FTP/Console Mirror?" section to this document
+
 ## Configuring a station
 
 Station number is set with the button on the beamer - clicking goes up and, if you overshoot, holding the button will go down. Other configuration (most importantly wifi info) is set by editing `CONFIG/config.txt`. Keys are case-insensitive, blank lines and `#` comments are ignored, and values may be quoted.
