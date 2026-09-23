@@ -11,6 +11,10 @@ All responses are JSON. There is no authentication: anyone who can reach the sta
 
 Setting `DEBUG` can sometimes add endpoints under `/debug/` - they're intentionally undocumented and unsupported. If you want to read the code and use them تَفَضَّلِي, but don't rely on them keeping the same shape or even existing on a new release.
 
+## Schema
+
+`GET /status`, `GET /SLIPPI/`, and every multicast carry `"schema": 1`. The number will go up if there's ever a breaking change: a key removed, renamed or retyped, or an existing key whose meaning changes.
+
 ## `GET /status`
 
 Everything here is cached by the scan tick so this `GET` is very cheap - **it's the pollable endpoint**.

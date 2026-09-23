@@ -511,7 +511,7 @@ class Station:
             since_chars = secs_since(self.character_change_at, now)
             since_game = secs_since(self.game_start_at, now)
         return {
-            "schema": SCHEMA,
+            "schema": self.args.schema,
             "arch": "fake",
             "firmware_version": "fake",
             "station_id": self.station_id,
@@ -546,7 +546,7 @@ class Station:
             except OSError:
                 replay = None
         return {
-            "schema": SCHEMA,
+            "schema": self.args.schema,
             "event": event,
             "station_id": self.station_id,
             "station_name": self.station_name,
@@ -578,7 +578,7 @@ class Station:
                 }
             )
         return {
-            "schema": SCHEMA,
+            "schema": self.args.schema,
             "station_id": self.station_id,
             "served_replay_count": len(files),
             "files": files,
@@ -886,6 +886,9 @@ def advertise(name, port):
               help='Comma-separated warning labels, e.g. "DRIVE FULL,NO WII"; '
                    'any warning reports health "warn".')
 @click.option("--unreported", is_flag=True, help="Answer 503 on GET /status.")
+@click.option("--schema", type=int, default=SCHEMA, show_default=True,
+              help="schema to report on /status, /SLIPPI/ and announces, e.g. 2 "
+                   "to play a station on firmware newer than the app.")
 @click.option("--truncate-every", type=int, default=0, metavar="N",
               help="Stop the chunked stream mid-body with no terminating chunk on "
                    "every Nth replay - a dropped-link truncation.")
