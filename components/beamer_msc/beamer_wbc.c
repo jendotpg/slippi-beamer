@@ -12,6 +12,7 @@
 
 #include "beamer_msc.h"
 
+#include <inttypes.h>
 #include <stdatomic.h>
 #include <string.h>
 
@@ -26,8 +27,12 @@ static const char *TAG = "beamer_wbc";
 #define WBC_FLUSH_RUN 16
 
 #define WBC_STALL_SLICE_MS 50
-#define WBC_STALL_SLICES 100
 
+#define WBC_REINIT_AFTER 5                // failed card commands in a row (500 ms each, beamer_msc.c)
+#define WBC_REINIT_GAP_US (1000 * 1000)   // between re-init attempts
+#define WBC_BUSY_TIMEOUT_US (5000 * 1000) // post-write, before busy must be gone
+
+// only touch with s_meta_lock held
 static __attribute__((aligned(4))) uint8_t s_data[WBC_SECTORS][WBC_SECTOR_SZ];
 
 typedef struct
@@ -38,22 +43,32 @@ typedef struct
     bool dirty;
 } wbc_slot_t;
 
-static wbc_slot_t s_meta[WBC_SECTORS];
+static wbc_slot_t s_meta[WBC_SECTORS]; // only touch with s_meta_lock held
 
-static sdmmc_card_t *s_card;
+static sdmmc_card_t *s_card; // only send commands to (or re-init) the card with s_lock held
 static SemaphoreHandle_t s_lock;
 static SemaphoreHandle_t s_meta_lock;
 
 static SemaphoreHandle_t s_flush_lock;
 static __attribute__((aligned(4))) uint8_t s_staging[WBC_FLUSH_RUN * WBC_SECTOR_SZ];
 
-static uint32_t s_seq;
+static uint32_t s_seq; // only touch with s_meta_lock held
 static atomic_uint s_dirty;
 static atomic_uint s_high_water;
 static atomic_uint s_stalls;
 static atomic_int s_policy = BEAMER_WBC_WRITEBACK;
 static atomic_uint s_read_wait_us;
 static atomic_uint s_read_wait_max_us;
+
+// only touch with s_lock held
+static unsigned s_fail_streak;
+static bool s_card_lost;
+static int64_t s_last_reinit_us;
+static sdmmc_card_t s_fresh; // re-init lands here first, so a failed one leaves s_card alone
+
+static atomic_uint s_write_failures;
+static atomic_uint s_busy_timeouts;
+static atomic_bool s_writes_healthy = true;
 
 static SemaphoreHandle_t s_work; // wakes flush
 static SemaphoreHandle_t s_room; // wakes "out of sloots" writer
@@ -67,6 +82,7 @@ static StaticSemaphore_t s_room_buf;
 static StackType_t s_stack[WBC_STACK];
 static StaticTask_t s_tcb;
 
+// only call with s_meta_lock held
 static int find(uint32_t lba)
 {
     for (int i = 0; i < WBC_SECTORS; i++)
@@ -79,6 +95,7 @@ static int find(uint32_t lba)
     return -1;
 }
 
+// only call with s_meta_lock held
 static int find_free(void)
 {
     for (int i = 0; i < WBC_SECTORS; i++)
@@ -91,6 +108,7 @@ static int find_free(void)
     return -1;
 }
 
+// only call with s_meta_lock held
 static int oldest_dirty(void)
 {
     int best = -1;
@@ -104,6 +122,7 @@ static int oldest_dirty(void)
     return best;
 }
 
+// only call with s_meta_lock held
 static int oldest_clean(void)
 {
     int best = -1;
@@ -117,6 +136,7 @@ static int oldest_clean(void)
     return best;
 }
 
+// only call with s_meta_lock held
 static void mark_dirty(int slot)
 {
     if (!s_meta[slot].dirty)
@@ -130,6 +150,7 @@ static void mark_dirty(int slot)
     }
 }
 
+// only call with s_meta_lock held
 static void mark_clean(int slot)
 {
     if (s_meta[slot].dirty)
@@ -137,6 +158,102 @@ static void mark_clean(int slot)
         s_meta[slot].dirty = false;
         atomic_fetch_sub(&s_dirty, 1);
     }
+}
+
+// only call with s_lock held
+static void reinit_locked(const char *why)
+{
+    const int64_t now = esp_timer_get_time();
+    s_last_reinit_us = now;
+    s_fail_streak = 0;
+
+    if (!s_card_lost)
+    {
+        sdmmc_command_t probe = {
+            .opcode = MMC_SEND_STATUS,
+            .arg = MMC_ARG_RCA(s_card->rca),
+            .flags = SCF_CMD_AC | SCF_RSP_R1,
+            .timeout_ms = s_card->host.command_timeout_ms,
+        };
+        const esp_err_t perr = s_card->host.do_transaction(s_card->host.slot, &probe);
+        if (perr == ESP_OK)
+        {
+            ESP_LOGW(TAG, "%s: card stalled, answers status in state %u (r1 0x%08" PRIx32 ")",
+                     why, (unsigned)MMC_R1_CURRENT_STATE(probe.response), probe.response[0]);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "%s: card lost, no answer to status at its address (0x%x)", why, perr);
+        }
+    }
+
+    s_card->host.set_bus_width(s_card->host.slot, 1);
+    s_card->host.set_card_clk(s_card->host.slot, SDMMC_FREQ_PROBING);
+
+    const esp_err_t rc = sdmmc_card_init(&s_card->host, &s_fresh);
+    const int64_t took = esp_timer_get_time() - now;
+
+    s_card_lost = rc != ESP_OK;
+    if (rc == ESP_OK)
+    {
+        *s_card = s_fresh;
+        atomic_store(&s_writes_healthy, true);
+        ESP_LOGW(TAG, "%s: re-init ok in %lld us", why, took);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "%s: re-init failed: %s (0x%x) after %lld us", why, esp_err_to_name(rc), rc,
+                 took);
+    }
+}
+
+// only call with s_lock held
+static void card_result_locked(esp_err_t err, bool busy)
+{
+    if (err == ESP_OK)
+    {
+        s_fail_streak = 0;
+        return;
+    }
+    if (!s_card_lost && (err == ESP_ERR_INVALID_SIZE || err == ESP_ERR_INVALID_ARG))
+    {
+        return;
+    }
+    if (busy)
+    {
+        reinit_locked("card stayed busy after a write");
+        return;
+    }
+    if (++s_fail_streak < WBC_REINIT_AFTER)
+    {
+        return;
+    }
+    const int64_t now = esp_timer_get_time();
+    if (s_last_reinit_us != 0 && now - s_last_reinit_us < WBC_REINIT_GAP_US)
+    {
+        return;
+    }
+    reinit_locked("card commands failing");
+}
+
+// only call with s_lock held
+static esp_err_t card_write_locked(uint32_t lba, const void *buf, size_t count)
+{
+    const int64_t t0 = esp_timer_get_time();
+    const esp_err_t err = sdmmc_write_sectors(s_card, buf, lba, count);
+    const bool busy =
+        err == ESP_ERR_TIMEOUT && esp_timer_get_time() - t0 >= WBC_BUSY_TIMEOUT_US;
+    if (err == ESP_OK)
+    {
+        atomic_store(&s_writes_healthy, true);
+    }
+    else
+    {
+        atomic_store(&s_writes_healthy, false);
+        atomic_fetch_add(busy ? &s_busy_timeouts : &s_write_failures, 1);
+    }
+    card_result_locked(err, busy);
+    return err;
 }
 
 static esp_err_t flush_one_run(void)
@@ -186,7 +303,7 @@ static esp_err_t flush_one_run(void)
         xSemaphoreGive(s_flush_lock);
         return ESP_ERR_TIMEOUT;
     }
-    const esp_err_t err = sdmmc_write_sectors(s_card, s_staging, start_lba, n);
+    const esp_err_t err = card_write_locked(start_lba, s_staging, n);
     xSemaphoreGive(s_lock);
     const int64_t t1 = esp_timer_get_time();
 
@@ -245,21 +362,36 @@ esp_err_t beamer_wbc_start(sdmmc_card_t *card, SemaphoreHandle_t lock)
     return ESP_OK;
 }
 
-static esp_err_t write_direct(uint32_t lba, const void *buf, size_t count)
+static TickType_t ticks_until(int64_t deadline_us)
 {
-    const int64_t t0 = esp_timer_get_time();
-    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(5000)) != pdTRUE)
+    const int64_t left = deadline_us - esp_timer_get_time();
+    return left > 0 ? pdMS_TO_TICKS(left / 1000) : 0;
+}
+
+static esp_err_t write_direct(uint32_t lba, const void *buf, size_t count, int64_t deadline_us)
+{
+    esp_err_t err = ESP_ERR_TIMEOUT;
+    do
     {
-        return ESP_ERR_TIMEOUT;
-    }
-    const esp_err_t err = sdmmc_write_sectors(s_card, buf, lba, count);
-    xSemaphoreGive(s_lock);
-    const int64_t t1 = esp_timer_get_time();
-    beamer_msc_ring_push(BEAMER_MSC_OP_FLUSH, lba, (uint16_t)count, t0, t1, err);
+        const int64_t t0 = esp_timer_get_time();
+        if (xSemaphoreTake(s_lock, ticks_until(deadline_us)) != pdTRUE)
+        {
+            return ESP_ERR_TIMEOUT;
+        }
+        err = card_write_locked(lba, buf, count);
+        xSemaphoreGive(s_lock);
+        const int64_t t1 = esp_timer_get_time();
+        beamer_msc_ring_push(BEAMER_MSC_OP_FLUSH, lba, (uint16_t)count, t0, t1, err);
+        if (err == ESP_OK)
+        {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(WBC_STALL_SLICE_MS));
+    } while (esp_timer_get_time() < deadline_us);
     return err;
 }
 
-esp_err_t beamer_wbc_write(uint32_t lba, const void *buf, size_t count)
+esp_err_t beamer_wbc_write(uint32_t lba, const void *buf, size_t count, int64_t deadline_us)
 {
     const beamer_wbc_policy_t policy = atomic_load(&s_policy);
 
@@ -280,7 +412,7 @@ esp_err_t beamer_wbc_write(uint32_t lba, const void *buf, size_t count)
             }
         }
         xSemaphoreGive(s_meta_lock);
-        return write_direct(lba, buf, count);
+        return write_direct(lba, buf, count, deadline_us);
     }
 
     const uint8_t *src = (const uint8_t *)buf;
@@ -294,6 +426,7 @@ esp_err_t beamer_wbc_write(uint32_t lba, const void *buf, size_t count)
         if (slot >= 0)
         {
             memcpy(s_data[slot], src + i * WBC_SECTOR_SZ, WBC_SECTOR_SZ);
+            s_meta[slot].seq = ++s_seq;
             mark_dirty(slot);
             xSemaphoreGive(s_meta_lock);
             xSemaphoreGive(s_work);
@@ -313,7 +446,7 @@ esp_err_t beamer_wbc_write(uint32_t lba, const void *buf, size_t count)
             xSemaphoreGive(s_work);
 
             bool room = false;
-            for (int i = 0; i < WBC_STALL_SLICES && !room; i++)
+            while (!room && esp_timer_get_time() < deadline_us)
             {
                 xSemaphoreTake(s_room, pdMS_TO_TICKS(WBC_STALL_SLICE_MS));
                 xSemaphoreTake(s_meta_lock, portMAX_DELAY);
@@ -342,7 +475,7 @@ esp_err_t beamer_wbc_write(uint32_t lba, const void *buf, size_t count)
     return ESP_OK;
 }
 
-esp_err_t beamer_wbc_read(uint32_t lba, void *buf, size_t count)
+esp_err_t beamer_wbc_read(uint32_t lba, void *buf, size_t count, int64_t deadline_us)
 {
     uint8_t *dst = (uint8_t *)buf;
     size_t i = 0;
@@ -365,22 +498,32 @@ esp_err_t beamer_wbc_read(uint32_t lba, void *buf, size_t count)
         }
         xSemaphoreGive(s_meta_lock);
 
-        const int64_t t0 = esp_timer_get_time();
-        if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(5000)) != pdTRUE)
+        esp_err_t err;
+        while (true)
         {
-            return ESP_ERR_TIMEOUT;
-        }
-        const uint32_t waited = (uint32_t)(esp_timer_get_time() - t0);
-        atomic_fetch_add(&s_read_wait_us, waited);
-        uint32_t seen = atomic_load(&s_read_wait_max_us);
-        while (waited > seen &&
-               !atomic_compare_exchange_weak(&s_read_wait_max_us, &seen, waited))
-        {
-        }
+            const int64_t t0 = esp_timer_get_time();
+            const TickType_t wait = deadline_us ? ticks_until(deadline_us) : pdMS_TO_TICKS(5000);
+            if (xSemaphoreTake(s_lock, wait) != pdTRUE)
+            {
+                return ESP_ERR_TIMEOUT;
+            }
+            const uint32_t waited = (uint32_t)(esp_timer_get_time() - t0);
+            atomic_fetch_add(&s_read_wait_us, waited);
+            uint32_t seen = atomic_load(&s_read_wait_max_us);
+            while (waited > seen &&
+                   !atomic_compare_exchange_weak(&s_read_wait_max_us, &seen, waited))
+            {
+            }
 
-        const esp_err_t err =
-            sdmmc_read_sectors(s_card, dst + i * WBC_SECTOR_SZ, lba + i, run);
-        xSemaphoreGive(s_lock);
+            err = sdmmc_read_sectors(s_card, dst + i * WBC_SECTOR_SZ, lba + i, run);
+            card_result_locked(err, false);
+            xSemaphoreGive(s_lock);
+            if (err == ESP_OK || esp_timer_get_time() >= deadline_us)
+            {
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(WBC_STALL_SLICE_MS));
+        }
         if (err != ESP_OK)
         {
             return err;
@@ -464,6 +607,21 @@ uint32_t beamer_wbc_high_water(void)
 uint32_t beamer_wbc_stalls(void)
 {
     return atomic_load(&s_stalls);
+}
+
+uint32_t beamer_wbc_write_failures(void)
+{
+    return atomic_load(&s_write_failures);
+}
+
+uint32_t beamer_wbc_busy_timeouts(void)
+{
+    return atomic_load(&s_busy_timeouts);
+}
+
+bool beamer_wbc_writes_healthy(void)
+{
+    return atomic_load(&s_writes_healthy);
 }
 
 uint32_t beamer_wbc_read_wait_us(void)

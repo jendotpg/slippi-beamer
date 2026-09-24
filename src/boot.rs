@@ -171,6 +171,9 @@ pub fn run() -> anyhow::Result<()> {
     let mut warned_no_host = false;
     let mut warned_not_ready = false;
     let mut reported_bad_read = false;
+    let mut reported_bad_write = false;
+    let mut seen_write_failures = 0;
+    let mut seen_busy_timeouts = 0;
     let mut writing = Hold::new(WRITE_HOLD);
     let mut sending = Hold::new(SEND_HOLD);
     loop {
@@ -263,12 +266,67 @@ pub fn run() -> anyhow::Result<()> {
                     ErrorLabel::SdUnreadable,
                     "sd",
                     &[
-                        "the card stopped answering transfers",
+                        "a host read failed after being held while the card recovered",
                         &detail,
                         "a different card is the first thing to try",
                     ],
                 );
             }
+        }
+
+        if !reported_bad_write {
+            let err = storage::msc::first_write_err();
+            if err != 0 {
+                reported_bad_write = true;
+                let detail = format!(
+                    "first write error 0x{err:x} after {} sector(s) written",
+                    storage::msc::writes_ok(),
+                );
+                errors::error(
+                    Target::Late,
+                    ErrorLabel::WriteFailed,
+                    "sd",
+                    &[
+                        "a host write failed after being held while the card recovered",
+                        &detail,
+                        "the replay being recorded is lost; later games record normally",
+                    ],
+                );
+            }
+        }
+
+        let (write_failures, busy_timeouts, writes_healthy) = storage::msc::card_write_trouble();
+        if write_failures > seen_write_failures {
+            seen_write_failures = write_failures;
+            let detail = format!("{write_failures} failed card write(s) this boot");
+            errors::error(
+                Target::Late,
+                ErrorLabel::WriteFailed,
+                "sd",
+                &[
+                    "a card write failed; retrying, and re-initializing the card if it keeps failing",
+                    &detail,
+                    "the host's write is held meanwhile, so nothing is lost unless it runs out",
+                ],
+            );
+        }
+        if busy_timeouts > seen_busy_timeouts {
+            seen_busy_timeouts = busy_timeouts;
+            let detail = format!("{busy_timeouts} time(s) this boot");
+            errors::error(
+                Target::Late,
+                ErrorLabel::CardStuck,
+                "sd",
+                &[
+                    "the card stayed busy for too long after a write; re-initializing it",
+                    &detail,
+                    "the host's write is held meanwhile, so nothing is lost unless it runs out",
+                ],
+            );
+        }
+        if writes_healthy {
+            errors::resolve(ErrorLabel::WriteFailed);
+            errors::resolve(ErrorLabel::CardStuck);
         }
 
         if storage::msc::take_eject() {
@@ -337,7 +395,7 @@ fn eject(sd: &SdCard, id: &StationId) {
         let detail = format!("{} sector(s) still dirty: {e}", storage::msc::cache_dirty());
         errors::error(
             Target::Late,
-            ErrorLabel::SdUnreadable,
+            ErrorLabel::WriteFailed,
             "sd",
             &[
                 "could not flush the write cache on eject",
@@ -420,7 +478,7 @@ fn flush_before_sleep(sd: &SdCard, id: &StationId) {
         let detail = format!("{} sector(s) lost: {e}", storage::msc::cache_dirty());
         errors::error(
             Target::Late,
-            ErrorLabel::SdUnreadable,
+            ErrorLabel::WriteFailed,
             "sd",
             &[
                 "slept with sectors the card never took",

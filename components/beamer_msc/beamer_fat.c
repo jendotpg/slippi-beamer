@@ -30,7 +30,7 @@ static DRESULT ro_read(BYTE pdrv, BYTE *buff, DWORD sector, UINT count)
 {
     (void)pdrv;
 
-    const esp_err_t err = beamer_wbc_read((uint32_t)sector, buff, count);
+    const esp_err_t err = beamer_wbc_read((uint32_t)sector, buff, count, 0); // the station's own reads never wait on a recovery
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "read %u+%u failed: 0x%x", (unsigned)sector, (unsigned)count, (int)err);

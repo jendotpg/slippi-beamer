@@ -1,17 +1,8 @@
 # Slippi Beamer
 
-STATUS: we have multiple brackets that have succesfully run on beamer! it's not quite at full release, though - there are still some bugs im tracking down before then :)
+**STATUS**: Multiple brackets have succesfully run on beamer! It's still in an early state, though. At this point I'll be more than happy to help you (the reader) get your local running on Beamer - feel free to reach out (@jenpissgirl on Discord).
 
-TODO:
-
-- make scan beat transfer when theyre both waiting for RO_LOCK
-- fix use-after-free thats breaking retry-after
-- shrink the write-back-cache - slippi nintendont never even comes close to filling all 64 sectors. like... 24 is probably overkill.
-- update ROUTERS.md
-
-A [Beamer](https://github.com/jendotpg/slippi-beamer) is a microprocessor attached to a Wii over the USB port. The Beamer presents a disk image to the Wii as an ordinary USB flash drive. Slippi Nintendont writes .slp files to it believing it is a stick. The Beamer then serves those same replays over the tournament WiFi (or, for bigger tournaments, over a dedicated IoT access point).
-
-For details on Beamer API, see [API.md](./API.md) . For details on this firmware, see [FIRMWARE_DETAILS.md](FIRMWARE_DETAILS.md). For suggested router setup, see [ROUTERS.md](ROUTERS.md).
+A [Beamer](https://github.com/jendotpg/slippi-beamer) is a special USB stick that can send Slippi Replays over Wifi in addition to keeping them in storage. It works together with [the Beamer version of Replay Reporter](https://github.com/jendotpg/replay-manager-for-slippi) to completely eliminate the need for USB handoffs. If you're already comfortable with Replay Reporter, you shouldn't need any technical expertise to get this up and running! The most technical part is setting up the router - your home network probably works fine for up to ~10 beamers, but if you're in a commercial venue it might be a little more complex. See [ROUTERS.md](ROUTERS.md) and don't hesitate to reach out to me directly.
 
 ## Running a tournament on Beamers
 
@@ -35,17 +26,17 @@ Open up the [Beamer fork of replay manager](https://github.com/jendotpg/replay-m
 
 ### Reporting
 
-Click the Beamer icon (it looks like a remote control) in the upper menu of Replay Manager. From here, you can see the status of all the beamers in the field - clicking one will download the last replays from that station so that you can report a set using the regular Replay Manager interface we all know and love.
+Open the Beamer menu - from here, you can see the status of all the beamers in the field. Clicking a row will download the last replays from that station so that you can report a set using the regular Replay Manager interface we all know and love.
 
-## Buying a Beamer
+## Buying Beamers
 
 | Item                        | Detail                                                                                                                                                                                        | Where I Source Them                                                                                                                    | Price |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----- |
 | LilyGO T-Dongle-S3 with LCD | Get the variant with the screen - otherwise setting station number is VERY annoying.                                                                                                          | [www.amazon.com/dp/B0BK9162QY](https://www.amazon.com/dp/B0BK9162QY?lv=shuf&channelId=500&plpRedirect=mhFallback&th=1)                 | ~$15  |
 | microSD card                | Any size from 4 GB up. Make sure to format the card to 4 GB FAT with 4 KB clusters.                                                                                                           | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793) | ~$6   |
-| Router                      | Only really needed if you have more than ~10 setups - otherwise, you can probably get away with venue wifi.<br /><br />One per section. Try to keep all setups within ~20 feet of the router. | see[ROUTERS.md](ROUTERS.md)                                                                                                            |       |
+| Router                      | Only really needed if you have more than ~10 setups - otherwise, you can probably get away with venue wifi.<br /><br />One per section. Try to keep all setups within ~20 feet of the router. | see [ROUTERS.md](ROUTERS.md)                                                                                                           |       |
 
-## Setting up a new Beamer
+## Assembling a new Beamer
 
 1. Format your microSD card - FAT32, first partition sized at 4GB (or smaller).
 2. Insert the microSD card into the dongle. Note: The microSD slot is INSIDE the usb jack! Remove the dummy card that comes inside to insert the new one.
@@ -64,7 +55,7 @@ Station number is set with the button on the beamer - clicking goes up and, if y
 
 | Key                  | Default | What it does                                                                                                                                              |
 | -------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SSID`               | blank   | The network to join.                                                                                                                                      |
+| `SSID`               | blank   | The network to join.                                                                                                                                      |
 | `PASSWORD`           | blank   | 8–63 characters. Blank means an open network.                                                                                                             |
 | `COUNTRY`            | `US`    | Two-letter regulatory domain:`US`, `CA`, `JP`, `GB`...                                                                                                    |
 | `HIDDEN`             | `false` | Whether the network broadcasts its name.                                                                                                                  |
@@ -73,3 +64,9 @@ Station number is set with the button on the beamer - clicking goes up and, if y
 | `LED-BRIGHTNESS`     | `20`    | The status LED brightness, 0 to 100 percent.                                                                                                              |
 | `FLIP-SCREEN`        | `false` | Whether the screen starts upside down. If you stand your Wii up, you probably want this.                                                                  |
 | `DEBUG`              | `false` | Debug mode. Don't use this unless you know what you're doing.                                                                                             |
+
+## Learn More
+
+Application developers looking for the details of the Beamer API, see [API.md](./API.md).
+
+Firmware developers looking for more information about this firmware repo, see [FIRMWARE_DETAILS.md](FIRMWARE_DETAILS.md).

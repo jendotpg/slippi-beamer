@@ -64,6 +64,7 @@ extern "C"
     uint32_t beamer_msc_writes_ok(void);
 
     int beamer_msc_first_err(void);
+    int beamer_msc_first_write_err(void);
 
     bool beamer_msc_eject_seen(void);
 
@@ -106,8 +107,8 @@ extern "C"
     } beamer_wbc_policy_t;
 
     esp_err_t beamer_wbc_start(sdmmc_card_t *card, SemaphoreHandle_t lock);
-    esp_err_t beamer_wbc_write(uint32_t lba, const void *buf, size_t count);
-    esp_err_t beamer_wbc_read(uint32_t lba, void *buf, size_t count);
+    esp_err_t beamer_wbc_write(uint32_t lba, const void *buf, size_t count, int64_t deadline_us);
+    esp_err_t beamer_wbc_read(uint32_t lba, void *buf, size_t count, int64_t deadline_us);
     esp_err_t beamer_wbc_flush_all(void);
     void beamer_wbc_invalidate_all(void);
 
@@ -118,6 +119,9 @@ extern "C"
     uint32_t beamer_wbc_high_water(void);
     uint32_t beamer_wbc_capacity(void);
     uint32_t beamer_wbc_stalls(void);
+    uint32_t beamer_wbc_write_failures(void);
+    uint32_t beamer_wbc_busy_timeouts(void);
+    bool beamer_wbc_writes_healthy(void);
     uint32_t beamer_wbc_read_wait_us(void);
     uint32_t beamer_wbc_read_wait_max_us(void);
     void beamer_wbc_read_wait_reset(void);

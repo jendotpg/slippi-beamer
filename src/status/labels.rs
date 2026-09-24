@@ -4,6 +4,8 @@ pub enum ErrorLabel {
     NoId,
     NoSdCard,
     SdUnreadable,
+    WriteFailed,
+    CardStuck,
     WrongFormat,
     NoConfig,
     BadConfig,
@@ -28,7 +30,11 @@ impl ErrorLabel {
     pub fn clears_itself(self) -> bool {
         matches!(
             self,
-            ErrorLabel::WifiIssue | ErrorLabel::WifiTooFull | ErrorLabel::OutOfMemory
+            ErrorLabel::WifiIssue
+                | ErrorLabel::WifiTooFull
+                | ErrorLabel::OutOfMemory
+                | ErrorLabel::WriteFailed
+                | ErrorLabel::CardStuck
         )
     }
 
@@ -37,6 +43,8 @@ impl ErrorLabel {
             ErrorLabel::NoId => "NO ID",
             ErrorLabel::NoSdCard => "NO SD CARD",
             ErrorLabel::SdUnreadable => "SD UNREADABLE",
+            ErrorLabel::WriteFailed => "WRITE FAILED",
+            ErrorLabel::CardStuck => "CARD STUCK",
             ErrorLabel::WrongFormat => "WRONG FORMAT",
             ErrorLabel::NoConfig => "NO CONFIG",
             ErrorLabel::BadConfig => "BAD CONFIG",
@@ -56,6 +64,8 @@ impl ErrorLabel {
             ErrorLabel::WifiIssue => "cannot reach the wifi network",
             ErrorLabel::WifiTooFull => "the network gave out no address",
             ErrorLabel::OutOfMemory => "the heap ran out",
+            ErrorLabel::WriteFailed => "a write to the card failed",
+            ErrorLabel::CardStuck => "the card stayed busy after a write",
             _ => "",
         }
     }

@@ -119,8 +119,9 @@ static atomic_bool s_eject;
 static int64_t s_bind_us;
 
 static atomic_uint s_reads_ok;
-static atomic_int s_first_err;
-static atomic_bool s_locked; // locked means "received PREVENT ALLOW MEDIUM REMOVAL"
+static atomic_int s_first_err;       // first read failure this boot
+static atomic_int s_first_write_err; // first write failure this boot
+static atomic_bool s_locked;         // locked means "received PREVENT ALLOW MEDIUM REMOVAL"
 static atomic_uint s_writes_ok;
 
 static atomic_bool s_eject_seen;
@@ -235,6 +236,10 @@ uint32_t beamer_msc_dropped(void)
     return atomic_load(&s_dropped);
 }
 
+#define BEAMER_HOST_HOLD_US (30 * 1000 * 1000) // how long to hold a host read or write while trying to recover (30s)
+
+static int64_t s_host_deadline_us;
+
 static int32_t transfer(bool write, uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
 {
     if (!atomic_load(&s_media_present) || s_card == NULL)
@@ -255,6 +260,8 @@ static int32_t transfer(bool write, uint32_t lba, uint32_t offset, void *buffer,
         return 0;
     }
 
+    atomic_int *const first = write ? &s_first_write_err : &s_first_err;
+
     const uint32_t limit = visible_sectors();
     if (limit == 0 || start >= limit || (uint32_t)count > limit - start)
     {
@@ -262,7 +269,7 @@ static int32_t transfer(bool write, uint32_t lba, uint32_t offset, void *buffer,
         beamer_msc_ring_push(write ? BEAMER_MSC_OP_WRITE : BEAMER_MSC_OP_READ, start,
                              (uint16_t)count, t, t, ESP_ERR_INVALID_SIZE);
         int none = 0;
-        if (atomic_compare_exchange_strong(&s_first_err, &none, (int)ESP_ERR_INVALID_SIZE))
+        if (atomic_compare_exchange_strong(first, &none, (int)ESP_ERR_INVALID_SIZE))
         {
             ESP_EARLY_LOGE(TAG, "%s lba %u x%u past visible %u", write ? "write" : "read",
                            (unsigned)start, (unsigned)count, (unsigned)limit);
@@ -272,8 +279,12 @@ static int32_t transfer(bool write, uint32_t lba, uint32_t offset, void *buffer,
 
     const int64_t t0 = esp_timer_get_time();
     s_last_cbw_us = t0;
-    const esp_err_t err = write ? beamer_wbc_write(start, buffer, count)
-                                : beamer_wbc_read(start, buffer, count);
+    if (offset == 0)
+    {
+        s_host_deadline_us = t0 + BEAMER_HOST_HOLD_US;
+    }
+    const esp_err_t err = write ? beamer_wbc_write(start, buffer, count, s_host_deadline_us)
+                                : beamer_wbc_read(start, buffer, count, s_host_deadline_us);
     const int64_t t1 = esp_timer_get_time();
 
     beamer_msc_ring_push(write ? BEAMER_MSC_OP_WRITE : BEAMER_MSC_OP_READ, start, (uint16_t)count,
@@ -282,7 +293,7 @@ static int32_t transfer(bool write, uint32_t lba, uint32_t offset, void *buffer,
     if (err != ESP_OK)
     {
         int none = 0;
-        if (atomic_compare_exchange_strong(&s_first_err, &none, (int)err))
+        if (atomic_compare_exchange_strong(first, &none, (int)err))
         {
             ESP_EARLY_LOGE(TAG, "%s lba %u x%u failed: 0x%x", write ? "write" : "read",
                            (unsigned)start, (unsigned)count, (unsigned)err);
@@ -523,6 +534,11 @@ int beamer_msc_first_err(void)
     return atomic_load(&s_first_err);
 }
 
+int beamer_msc_first_write_err(void)
+{
+    return atomic_load(&s_first_write_err);
+}
+
 bool beamer_msc_host_owns(void)
 {
     return atomic_load(&s_locked);
@@ -656,6 +672,7 @@ esp_err_t beamer_msc_install(sdmmc_card_t *card, SemaphoreHandle_t lock, const c
 #define BEAMER_SD_D3 18
 
 #define BEAMER_SD_FREQ_KHZ SDMMC_FREQ_DEFAULT
+#define BEAMER_SD_CMD_TIMEOUT_MS 750 // card command giveup timer
 
 static sdmmc_card_t s_card_storage;
 static StaticSemaphore_t s_sd_lock_buf;
@@ -668,6 +685,7 @@ esp_err_t beamer_sd_init(sdmmc_card_t **out_card, SemaphoreHandle_t *out_lock)
     host.slot = SDMMC_HOST_SLOT_1;
     host.flags = SDMMC_HOST_FLAG_4BIT | SDMMC_HOST_FLAG_1BIT;
     host.max_freq_khz = BEAMER_SD_FREQ_KHZ;
+    host.command_timeout_ms = BEAMER_SD_CMD_TIMEOUT_MS;
 
     sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
     slot.width = 4;

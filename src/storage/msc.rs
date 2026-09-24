@@ -5,14 +5,15 @@ use std::ffi::CString;
 
 use esp_idf_svc::sys::{
     beamer_msc_bind_time_us, beamer_msc_census, beamer_msc_detach, beamer_msc_eject_seen,
-    beamer_msc_first_err, beamer_msc_host_owns, beamer_msc_install, beamer_msc_last_cbw_us,
-    beamer_msc_maxlun_asks, beamer_msc_media_present, beamer_msc_mounted, beamer_msc_mounts,
-    beamer_msc_reads_ok, beamer_msc_set_media, beamer_msc_set_visible, beamer_msc_suspended,
-    beamer_msc_take_dirty, beamer_msc_take_eject, beamer_msc_take_load, beamer_msc_umounts,
-    beamer_msc_unsup_t, beamer_msc_unsupported, beamer_msc_writes_ok, beamer_wbc_dirty,
-    beamer_wbc_flush_all, beamer_wbc_high_water, beamer_wbc_invalidate_all,
-    beamer_wbc_read_wait_max_us, beamer_wbc_read_wait_reset, beamer_wbc_read_wait_us,
-    beamer_wbc_set_policy, beamer_wbc_stalls, esp, EspError,
+    beamer_msc_first_err, beamer_msc_first_write_err, beamer_msc_host_owns, beamer_msc_install,
+    beamer_msc_last_cbw_us, beamer_msc_maxlun_asks, beamer_msc_media_present, beamer_msc_mounted,
+    beamer_msc_mounts, beamer_msc_reads_ok, beamer_msc_set_media, beamer_msc_set_visible,
+    beamer_msc_suspended, beamer_msc_take_dirty, beamer_msc_take_eject, beamer_msc_take_load,
+    beamer_msc_umounts, beamer_msc_unsup_t, beamer_msc_unsupported, beamer_msc_writes_ok,
+    beamer_wbc_busy_timeouts, beamer_wbc_dirty, beamer_wbc_flush_all, beamer_wbc_high_water,
+    beamer_wbc_invalidate_all, beamer_wbc_read_wait_max_us, beamer_wbc_read_wait_reset,
+    beamer_wbc_read_wait_us, beamer_wbc_set_policy, beamer_wbc_stalls, beamer_wbc_write_failures,
+    beamer_wbc_writes_healthy, esp, EspError,
 };
 
 use super::SdCard;
@@ -107,6 +108,10 @@ pub fn first_err() -> i32 {
     unsafe { beamer_msc_first_err() }
 }
 
+pub fn first_write_err() -> i32 {
+    unsafe { beamer_msc_first_write_err() }
+}
+
 pub fn host_owns() -> bool {
     unsafe { beamer_msc_host_owns() }
 }
@@ -162,6 +167,16 @@ pub fn cache_high_water() -> u32 {
 
 pub fn cache_stalls() -> u32 {
     unsafe { beamer_wbc_stalls() }
+}
+
+pub fn card_write_trouble() -> (u32, u32, bool) {
+    unsafe {
+        (
+            beamer_wbc_write_failures(),
+            beamer_wbc_busy_timeouts(),
+            beamer_wbc_writes_healthy(),
+        )
+    }
 }
 
 pub fn read_wait() -> (u32, u32) {

@@ -2,8 +2,8 @@
 
 Two rules for downstream tools:
 
-1. Don't block silently. Anything that can take more than a second announces itself 
-   BEFORE it starts (Step context). Anything that can take more than a minute prints a 
+1. Don't block silently. Anything that can take more than a second announces itself
+   BEFORE it starts (Step context). Anything that can take more than a minute prints a
    heartbeat while it runs (heartbeat context).
 2. Progress goes to stderr, results go to stdout.
 """
@@ -37,6 +37,7 @@ HELP_OPTIONS = {"help_option_names": ["-h", "--help"]}
 
 _started = time.monotonic()
 
+
 def elapsed() -> float:
     return time.monotonic() - _started
 
@@ -46,7 +47,9 @@ def say(message: str) -> None:
 
 
 def warn(message: str) -> None:
-    click.echo(f"[{elapsed():6.1f}s] {click.style('WARNING', fg='yellow')} {message}", err=True)
+    click.echo(
+        f"[{elapsed():6.1f}s] {click.style('WARNING', fg='yellow')} {message}", err=True
+    )
 
 
 def emit(line: str = "") -> None:
@@ -54,7 +57,9 @@ def emit(line: str = "") -> None:
 
 
 def banner(tool: str, **facts: object) -> None:
-    shown = "  ".join(f"{k.replace('_', ' ')} {v}" for k, v in facts.items() if v not in (None, ""))
+    shown = "  ".join(
+        f"{k.replace('_', ' ')} {v}" for k, v in facts.items() if v not in (None, "")
+    )
     click.echo(click.style(f"== {tool} ==  {shown}", bold=True), err=True)
 
 
@@ -109,7 +114,11 @@ class Counter:
     def update(self, note: str = "") -> None:
         self.done += 1
         if sys.stderr.isatty():
-            click.echo(f"\r  {self.label}{self.done}/{self.total}  {note:<24}", err=True, nl=False)
+            click.echo(
+                f"\r  {self.label}{self.done}/{self.total}  {note:<24}",
+                err=True,
+                nl=False,
+            )
         else:
             say(f"  {self.label}{self.done}/{self.total}  {note}")
 
@@ -133,14 +142,17 @@ def _dns_sd(arguments: list[str], seconds: float, stop_on=None) -> list[str]:
     try:
         process = subprocess.Popen(
             ["dns-sd", *arguments],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
     except OSError:
         return []
 
     lines: list[str] = []
-    reader = threading.Thread(target=lambda: [lines.append(line) for line in process.stdout],
-                              daemon=True)
+    reader = threading.Thread(
+        target=lambda: [lines.append(line) for line in process.stdout], daemon=True
+    )
     reader.start()
     deadline = time.monotonic() + seconds
     seen = 0
@@ -219,7 +231,11 @@ def _mdns_encode_name(name: str) -> bytes:
 
 def _mdns_build_query(query_id: int, name: str) -> bytes:
     header = struct.pack(">HHHHHH", query_id, 0, 1, 0, 0, 0)
-    return header + _mdns_encode_name(name) + struct.pack(">HH", 1, _MDNS_QUERY_UNICAST | 1)
+    return (
+        header
+        + _mdns_encode_name(name)
+        + struct.pack(">HH", 1, _MDNS_QUERY_UNICAST | 1)
+    )
 
 
 def _mdns_skip_name(buffer: bytes, at: int) -> int:
@@ -247,16 +263,17 @@ def _mdns_answer_address(buffer: bytes, query_id: int) -> str | None:
         at = _mdns_skip_name(buffer, at)
         if at + 10 > len(buffer):
             return None
-        record_type, _, _, length = struct.unpack(">HHIH", buffer[at:at + 10])
+        record_type, _, _, length = struct.unpack(">HHIH", buffer[at : at + 10])
         at += 10
         if record_type == 1 and length == 4:
-            return ".".join(str(byte) for byte in buffer[at:at + 4])
+            return ".".join(str(byte) for byte in buffer[at : at + 4])
         at += length
     return None
 
 
-def probe_mdns(hostname: str, seconds: float, interval: float = 250.0,
-               timeout: float = 1.0) -> dict:
+def probe_mdns(
+    hostname: str, seconds: float, interval: float = 250.0, timeout: float = 1.0
+) -> dict:
     """Time HOSTNAME's mDNS A answers on the wire for `seconds`.
 
     A bare name gets .local appended. Returns a dict of the timing (answered,
@@ -304,17 +321,31 @@ def probe_mdns(hostname: str, seconds: float, interval: float = 250.0,
 
     sent = len(latencies) + timeouts
     if not latencies:
-        return {"answered": 0, "sent": sent, "timeouts": timeouts, "p50": None,
-                "p95": None, "max_ms": None, "addrs": [],
-                "summary": f"answered=0/{sent} timeouts={timeouts} NO ANSWERS AT ALL"}
+        return {
+            "answered": 0,
+            "sent": sent,
+            "timeouts": timeouts,
+            "p50": None,
+            "p95": None,
+            "max_ms": None,
+            "addrs": [],
+            "summary": f"answered=0/{sent} timeouts={timeouts} NO ANSWERS AT ALL",
+        }
     ordered = sorted(latencies)
     p50, p95, worst = percentile(ordered, 50), percentile(ordered, 95), ordered[-1]
     return {
-        "answered": len(latencies), "sent": sent, "timeouts": timeouts,
-        "p50": p50, "p95": p95, "max_ms": worst, "addrs": sorted(addresses),
-        "summary": (f"answered={len(latencies)}/{sent} timeouts={timeouts} "
-                    f"p50={p50:.1f}ms p95={p95:.1f}ms max={worst:.1f}ms "
-                    f"addrs={sorted(addresses)}"),
+        "answered": len(latencies),
+        "sent": sent,
+        "timeouts": timeouts,
+        "p50": p50,
+        "p95": p95,
+        "max_ms": worst,
+        "addrs": sorted(addresses),
+        "summary": (
+            f"answered={len(latencies)}/{sent} timeouts={timeouts} "
+            f"p50={p50:.1f}ms p95={p95:.1f}ms max={worst:.1f}ms "
+            f"addrs={sorted(addresses)}"
+        ),
     }
 
 
@@ -339,7 +370,9 @@ def _browse_events(seconds: float, on_event) -> None:
     try:
         process = subprocess.Popen(
             ["dns-sd", "-B", "_beamer._tcp"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
     except OSError:
         return
@@ -361,9 +394,13 @@ def _browse_events(seconds: float, on_event) -> None:
         process.stdout.close()
 
 
-def probe_fleet(ip: str, host: str | None = None, seconds: float = 180.0,
-                poll_ms: float = _FLEET_POLL_MS,
-                status_timeout: float = _STATUS_TIMEOUT_S) -> dict:
+def probe_fleet(
+    ip: str,
+    host: str | None = None,
+    seconds: float = 180.0,
+    poll_ms: float = _FLEET_POLL_MS,
+    status_timeout: float = _STATUS_TIMEOUT_S,
+) -> dict:
     """Watch discovery and /status for `seconds`, as the fleet view does.
 
     `host` is the _beamer._tcp instance name (a hostname); if omitted it is
@@ -420,13 +457,17 @@ def probe_fleet(ip: str, host: str | None = None, seconds: float = 180.0,
     total = now - start
     pct = present_s / total * 100 if total else 0.0
     return {
-        "present_pct": pct, "losses": losses,
-        "status_ok": poll["ok"], "status_fail": poll["fail"],
+        "present_pct": pct,
+        "losses": losses,
+        "status_ok": poll["ok"],
+        "status_fail": poll["fail"],
         "status_slowest_ms": poll["slowest"],
         "code": 1 if (losses > 0 or poll["fail"] > 0) else 0,
-        "summary": (f"present={pct:.1f}% of {total:.0f}s losses={losses} "
-                    f"status_ok={poll['ok']} status_fail={poll['fail']} "
-                    f"status_slowest={poll['slowest']:.0f}ms"),
+        "summary": (
+            f"present={pct:.1f}% of {total:.0f}s losses={losses} "
+            f"status_ok={poll['ok']} status_fail={poll['fail']} "
+            f"status_slowest={poll['slowest']:.0f}ms"
+        ),
     }
 
 
@@ -464,25 +505,42 @@ def find_station(explicit: str | None = None) -> str:
 def station_option(function):
     """--station, shared by every tool that talks to a beamer."""
     return click.option(
-        "--station", "station", metavar="NAME-OR-IP", default=None,
+        "--station",
+        "station",
+        metavar="NAME-OR-IP",
+        default=None,
         help="Station to test. Defaults to $BEAMER_HOST, then the first beamer on mDNS.",
     )(function)
 
 
 @dataclass
 class Pull:
-    status: str          # ok | short | http_error | timeout | error
+    status: str  # ok | short | http_error | timeout | error
     code: int | None
     total_seconds: float
     ttfb_seconds: float
-    decoded_bytes: int   # what the client app ends up with
-    wire_bytes: int      # what crossed the air
+    decoded_bytes: int  # what the client app ends up with
+    wire_bytes: int  # what crossed the air
     digest: str
     error: str = ""
+    retry_after: float | None = None  # seconds, when the station sent Retry-After
+    stage: str = ""  # where it ended: connect | send | headers | body | done
+
+    def failure(self) -> str:
+        code = f" HTTP {self.code}" if self.code else ""
+        return (
+            f"{self.status} in {self.stage}{code} after {self.total_seconds:.1f}s"
+            f" (ttfb {self.ttfb_seconds:.1f}s, {self.wire_bytes} B on the wire)"
+            + (f": {self.error}" if self.error else "")
+        )
 
     @property
     def kilobytes_per_second(self) -> float:
-        return self.decoded_bytes / self.total_seconds / 1024 if self.total_seconds > 0 else 0.0
+        return (
+            self.decoded_bytes / self.total_seconds / 1024
+            if self.total_seconds > 0
+            else 0.0
+        )
 
 
 class Station:
@@ -576,18 +634,36 @@ class Station:
         handle = sink.open("wb") if sink else None
         started = time.monotonic()
         ttfb = 0.0
+        retry_after = None
         connection = None
+        response = None
+        stage = "connect"
         try:
             connection = http.client.HTTPConnection(self.ip, 80, timeout=timeout)
+            connection.connect()
+            stage = "send"
             connection.request("GET", path, headers=headers)
+            stage = "headers"
             response = connection.getresponse()
+            stage = "body"
             ttfb = time.monotonic() - started
+            with contextlib.suppress(TypeError, ValueError):
+                retry_after = float(response.getheader("Retry-After"))
             compressed = response.getheader("Content-Encoding", "").lower() == "gzip"
             deadline = started + timeout
             while True:
                 if time.monotonic() > deadline:
-                    return Pull("timeout", response.status, time.monotonic() - started,
-                                ttfb, decoded, wire, "")
+                    return Pull(
+                        "timeout",
+                        response.status,
+                        time.monotonic() - started,
+                        ttfb,
+                        decoded,
+                        wire,
+                        "",
+                        retry_after=retry_after,
+                        stage=stage,
+                    )
                 chunk = response.read(32768)
                 if not chunk:
                     break
@@ -614,12 +690,42 @@ class Station:
                 status = "short"
             else:
                 status = "ok"
-            return Pull(status, code, total, ttfb, decoded, wire, hasher.hexdigest()[:12])
+            return Pull(
+                status,
+                code,
+                total,
+                ttfb,
+                decoded,
+                wire,
+                hasher.hexdigest()[:12],
+                retry_after=retry_after,
+                stage="done",
+            )
         except (socket.timeout, TimeoutError):
-            return Pull("timeout", None, time.monotonic() - started, ttfb, decoded, wire, "")
+            return Pull(
+                "timeout",
+                response.status if response else None,
+                time.monotonic() - started,
+                ttfb,
+                decoded,
+                wire,
+                "",
+                retry_after=retry_after,
+                stage=stage,
+            )
         except (OSError, http.client.HTTPException, zlib.error) as problem:
-            return Pull("error", None, time.monotonic() - started, ttfb, decoded, wire, "",
-                        error=f"{type(problem).__name__}: {problem}")
+            return Pull(
+                "error",
+                response.status if response else None,
+                time.monotonic() - started,
+                ttfb,
+                decoded,
+                wire,
+                "",
+                error=f"{type(problem).__name__}: {problem}",
+                retry_after=retry_after,
+                stage=stage,
+            )
         finally:
             if handle:
                 handle.close()
@@ -684,18 +790,22 @@ def median(values) -> float:
 @dataclass
 class AirScan:
     """Mac-specific. Sorry."""
+
     signal: list[int] = field(default_factory=list)
     noise: list[int] = field(default_factory=list)
     rates: list[int] = field(default_factory=list)
     mine: dict = field(default_factory=dict)
-    channels_24: dict = field(default_factory=dict)   # channel -> {ssid}
+    channels_24: dict = field(default_factory=dict)  # channel -> {ssid}
     channels_5: dict = field(default_factory=dict)
     scans: int = 0
 
     def contention(self) -> dict[int, int]:
         return {
-            channel: sum(len(names) for other, names in self.channels_24.items()
-                         if abs(other - channel) <= 2)
+            channel: sum(
+                len(names)
+                for other, names in self.channels_24.items()
+                if abs(other - channel) <= 2
+            )
             for channel in (1, 6, 11)
         }
 
@@ -707,7 +817,9 @@ def airport_scan() -> str:
     try:
         return subprocess.run(
             ["system_profiler", "SPAirPortDataType"],
-            capture_output=True, text=True, timeout=40,
+            capture_output=True,
+            text=True,
+            timeout=40,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -723,7 +835,9 @@ def parse_air(text: str, into: AirScan | None = None) -> AirScan:
             found = re.search(rf"{key}:\s*(.+)", block)
             return found.group(1).strip() if found else None
 
-        pair = re.match(r"(-?\d+)\s*dBm\s*/\s*(-?\d+)\s*dBm", field_of("Signal / Noise") or "")
+        pair = re.match(
+            r"(-?\d+)\s*dBm\s*/\s*(-?\d+)\s*dBm", field_of("Signal / Noise") or ""
+        )
         if pair:
             scan.signal.append(int(pair.group(1)))
             scan.noise.append(int(pair.group(2)))
