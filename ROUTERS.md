@@ -1,6 +1,6 @@
 # Networking
 
-Depending on how your tournament is set up, you may want TOs to see just Beamers in their section (Sharded) or to see every Beamer at the event (Connected). Either way, split the venue into sections of up to 30 setups each with their own router. Each setup should be within ~20 feet of the router. Whenever your venue will let you run ethernet cables to each section, do so - it will let you put laptops on 5GHz, which is a significant speedup!
+Depending on how your tournament is set up, you may want TOs to see just Beamers in their section (Sharded) or to see every Beamer at the event (Connected). Either way, split the venue into sections of up to 30 setups each with their own router. Each setup should be within ~30 feet of the router. Whenever your venue will let you run ethernet cables to each section, do so - it will let you put laptops on 5GHz, which is a significant speedup!
 
 ### Buying routers
 
@@ -13,7 +13,20 @@ If you want a router that works even when the venue has no ethernet, you'll need
 - GL.iNet Flint 2 (GL-MT6000) ~$169. **Recommended for sections with 25+ setups**
 - Any secondhand OpenWrt-capable router with 256MB of RAM. Netgear R7800 and Linksys WRT1900AC are common suggestions. If the stock firmware doesn't support wireless WAN with NAT (often called WISP mode), OpenWrt will - but you'll have to flash it yourself! **This is usually the cheapest option, but will require some technical know-how.**
 
-### Sharded sections
+### Single router - TESTED AND WORKING
+
+| Setting   | Value                                                          | Per section |
+| --------- | -------------------------------------------------------------- | ----------- |
+| Mode      | Router - repeater (also called WISP or wireless WAN)           | identical   |
+| WAN       | Source wifi, 5 GHz band (Or ethernet, if the venue offers it!) | identical   |
+| SSID      | `beamer-N`(this is really just a preference)                   | **unique**  |
+| LAN       | `10.N.0.0/24`                                                  | **unique**  |
+| 2.4 GHz   | the venue's least-contended channel                            | identical   |
+| 5 GHz     | taken by the wan (turn off!)                                   | identical   |
+| DHCP      | on                                                             | identical   |
+| Isolation | off                                                            | identical   |
+
+### Sharded sections - UNTESTED
 
 **Pool captains can only see Beamers in their section**.
 
@@ -50,33 +63,18 @@ flowchart TD
     SRC -->|WAN| RTR3
 ```
 
-#### Venue offers no ethernet
+| Setting   | Value                                                          | Per section |
+| --------- | -------------------------------------------------------------- | ----------- |
+| Mode      | Router - repeater (also called WISP or wireless WAN)           | identical   |
+| WAN       | Source wifi, 5 GHz band (Or ethernet, if the venue offers it!) | identical   |
+| SSID      | `beamer-N`(this is really just a preference)                   | **unique**  |
+| LAN       | `10.N.0.0/24`                                                  | **unique**  |
+| 2.4 GHz   | the venue's least-contended channel                            | identical   |
+| 5 GHz     | taken by the wan (turn off!)                                   | identical   |
+| DHCP      | on                                                             | identical   |
+| Isolation | off                                                            | identical   |
 
-| Setting   | Value                                                | Per section |
-| --------- | ---------------------------------------------------- | ----------- |
-| Mode      | Router - repeater (also called WISP or wireless WAN) | identical   |
-| WAN       | Source wifi, 5 GHz band                              | identical   |
-| SSID      | `beamer-N`(this is really just a preference)         | **unique**  |
-| LAN       | `10.N.0.0/24`                                        | **unique**  |
-| 2.4 GHz   | the venue's least-contended channel                  | identical   |
-| 5 GHz     | taken by the wan (turn off!)                         | identical   |
-| DHCP      | on                                                   | identical   |
-| Isolation | off                                                  | identical   |
-
-#### Venue offers ethernet
-
-| Setting   | Value                                     | Per section |
-| --------- | ----------------------------------------- | ----------- |
-| Mode      | Router                                    | identical   |
-| WAN       | Ethernet                                  | identical   |
-| SSID      | `beamer-N`(suggested)                     | **unique**  |
-| LAN       | `10.N.0.0/24`                             | **unique**  |
-| 2.4 GHz   | the venue's least-contended channel       | identical   |
-| 5 GHz     | the venue's least-contended 5 GHz channel | identical   |
-| DHCP      | on                                        | identical   |
-| Isolation | off                                       | identical   |
-
-### Connected sections
+### Connected sections - UNTESTED
 
 **TOs can see Beamers in every section**. Some venue WiFis will struggle with this setup, as its a lot of DHCP leases. If you can change the router settings, just growing the DHCP pool will fix this issue - if it belongs to the venue and you can't, however, you'll either have to use a sharded setup (and assign stations to players) or bring your own router to put between the venue router and the section routers.
 
@@ -113,28 +111,13 @@ flowchart TD
     SRC -->|WAN| RTR3
 ```
 
-#### Venue offers no ethernet
-
 | Setting   | Value                                                                        | Per section |
 | --------- | ---------------------------------------------------------------------------- | ----------- |
 | Mode      | Mesh extender (Sometimes called wireless repeater, media bridge, or just AP) | identical   |
-| WAN       | Source wifi, 5 GHz band                                                      | identical   |
+| WAN       | Source wifi, 5 GHz band (Or ethernet, if the venue offers it!)               | identical   |
 | SSID      | `beamer-N`(this is really just a preference)                                 | **unique**  |
 | LAN       | `10.N.0.0/24`                                                                | **unique**  |
 | 2.4 GHz   | the venue's least-contended channel                                          | identical   |
 | 5 GHz     | taken by the wan (turn off!)                                                 | identical   |
 | DHCP      | on                                                                           | identical   |
 | Isolation | off                                                                          | identical   |
-
-#### Venue offers ethernet
-
-| Setting   | Value                                     | Per section |
-| --------- | ----------------------------------------- | ----------- |
-| Mode      | AP                                        | identical   |
-| WAN       | Ethernet                                  | identical   |
-| SSID      | `beamer-N`(suggested)                     | **unique**  |
-| LAN       | `10.N.0.0/24`                             | **unique**  |
-| 2.4 GHz   | the venue's least-contended channel       | identical   |
-| 5 GHz     | the venue's least-contended 5 GHz channel | identical   |
-| DHCP      | on                                        | identical   |
-| Isolation | off                                       | identical   |

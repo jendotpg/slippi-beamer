@@ -7,13 +7,35 @@ TODO:
 - make scan beat transfer when theyre both waiting for RO_LOCK
 - fix use-after-free thats breaking retry-after
 - shrink the write-back-cache - slippi nintendont never even comes close to filling all 64 sectors. like... 24 is probably overkill.
-- fix this goddamned "beamer-close-to-router fails sometimes" bug. its so weird. it keeps happening even when you swap the wii and the beamer, in the same location: being close to the router somehow messes it up
-  - note that its not close enough for rf to be an issue - were talking 2-3 feet
-  - literally what could these even change T_T transfer speed too fast? somehow pushing the antennae further and thus drawing more power? idfk...
+- update ROUTERS.md
 
 A [Beamer](https://github.com/jendotpg/slippi-beamer) is a microprocessor attached to a Wii over the USB port. The Beamer presents a disk image to the Wii as an ordinary USB flash drive. Slippi Nintendont writes .slp files to it believing it is a stick. The Beamer then serves those same replays over the tournament WiFi (or, for bigger tournaments, over a dedicated IoT access point).
 
 For details on Beamer API, see [API.md](./API.md) . For details on this firmware, see [FIRMWARE_DETAILS.md](FIRMWARE_DETAILS.md). For suggested router setup, see [ROUTERS.md](ROUTERS.md).
+
+## Running a tournament on Beamers
+
+**WARNING: BEAMER IS CURRENTLY ONLY TESTED FOR TOURNAMENTS OF UP TO ~15 SETUPS. IF YOUR TOURNAMENT IS BIGGER THAN THAT AND YOU WANT TO RUN THIS, REACH OUT TO ME DIRECTLY!**
+
+I have already scheduled a few tournaments bigger than this and know how I plan to run them, but it's certainly not confirmed to work. This will come with time :)
+
+### Equipment
+
+First, you'll need to buy+assemble+configure one Beamer for each Wii. See the steps below for guidance there.
+
+You'll likely want to bring your own router (you can get an appropriate one for ~$40 max) as most venues will have routers that are too far away for the Beamers to work consistently, not to mention many having captive portals, limited DHCP pools, or device isolation. See [ROUTERS.md](ROUTERS.md) for guidance. Make sure to configure both the Beamers and your TO computer to connect to your router's network, not the venue's!
+
+Finally, make sure you have some label for station numbers (I use table number stands like restaurants have).
+
+### Set-up
+
+Plug one Beamer into each Wii after booting into Melee (make sure you're on Slippi Nintendont 1.13.0 or later). Press the button on the Beamer until the number on the screen matches the station number. If you overshoot, holding the button counts backwards ;)
+
+Open up the [Beamer fork of replay manager](https://github.com/jendotpg/replay-manager-for-slippi). Turn on auto-subscribe in settings. Before starting any games, erase the drive on every Beamer. You can do this later, but it won't work while someone is playing a game and so can be quite annoying to do later! If the drive fills up, replays stop coming.
+
+### Reporting
+
+Click the Beamer icon (it looks like a remote control) in the upper menu of Replay Manager. From here, you can see the status of all the beamers in the field - clicking one will download the last replays from that station so that you can report a set using the regular Replay Manager interface we all know and love.
 
 ## Buying a Beamer
 
@@ -21,7 +43,7 @@ For details on Beamer API, see [API.md](./API.md) . For details on this firmware
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----- |
 | LilyGO T-Dongle-S3 with LCD | Get the variant with the screen - otherwise setting station number is VERY annoying.                                                                                                          | [www.amazon.com/dp/B0BK9162QY](https://www.amazon.com/dp/B0BK9162QY?lv=shuf&channelId=500&plpRedirect=mhFallback&th=1)                 | ~$15  |
 | microSD card                | Any size from 4 GB up. Make sure to format the card to 4 GB FAT with 4 KB clusters.                                                                                                           | [www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793](https://www.digikey.com/en/products/detail/htsemi/HTF016G3U1/29285793) | ~$6   |
-| Router                      | Only really needed if you have more than ~10 setups - otherwise, you can probably get away with venue wifi.<br /><br />One per section. Try to keep all setups within ~20 feet of the router. | see [ROUTERS.md](ROUTERS.md)                                                                                                           |       |
+| Router                      | Only really needed if you have more than ~10 setups - otherwise, you can probably get away with venue wifi.<br /><br />One per section. Try to keep all setups within ~20 feet of the router. | see[ROUTERS.md](ROUTERS.md)                                                                                                            |       |
 
 ## Setting up a new Beamer
 
