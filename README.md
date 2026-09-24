@@ -1,5 +1,16 @@
 # Slippi Beamer
 
+STATUS: we have multiple brackets that have succesfully run on beamer! it's not quite at full release, though - there are still some bugs im tracking down before then :)
+
+TODO:
+
+- make scan beat transfer when theyre both waiting for RO_LOCK
+- fix use-after-free thats breaking retry-after
+- shrink the write-back-cache - slippi nintendont never even comes close to filling all 64 sectors. like... 24 is probably overkill.
+- fix this goddamned "beamer-close-to-router fails sometimes" bug. its so weird. it keeps happening even when you swap the wii and the beamer, in the same location: being close to the router somehow messes it up
+  - note that its not close enough for rf to be an issue - were talking 2-3 feet
+  - literally what could these even change T_T transfer speed too fast? somehow pushing the antennae further and thus drawing more power? idfk...
+
 A [Beamer](https://github.com/jendotpg/slippi-beamer) is a microprocessor attached to a Wii over the USB port. The Beamer presents a disk image to the Wii as an ordinary USB flash drive. Slippi Nintendont writes .slp files to it believing it is a stick. The Beamer then serves those same replays over the tournament WiFi (or, for bigger tournaments, over a dedicated IoT access point).
 
 For details on Beamer API, see [API.md](./API.md) . For details on this firmware, see [FIRMWARE_DETAILS.md](FIRMWARE_DETAILS.md). For suggested router setup, see [ROUTERS.md](ROUTERS.md).
