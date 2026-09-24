@@ -31,7 +31,7 @@ Finally, make sure you have some label for station numbers (I use table number s
 
 Plug one Beamer into each Wii after booting into Melee (make sure you're on Slippi Nintendont 1.13.0 or later). Press the button on the Beamer until the number on the screen matches the station number. If you overshoot, holding the button counts backwards ;)
 
-Open up the [Beamer fork of replay manager](https://github.com/jendotpg/replay-manager-for-slippi). Turn on auto-subscribe in settings. Before starting any games, erase the drive on every Beamer. You can do this later, but it won't work while someone is playing a game and so can be quite annoying to do later! If the drive fills up, replays stop coming.
+Open up the [Beamer fork of replay manager](https://github.com/jendotpg/replay-manager-for-slippi). Turn on auto-subscribe in settings. Before starting any sets, open up the Beamer menu (click the remote control Beamer icon in the top right of the screen) and click "Erase All" to wipe the drive on every Beamer. If the drive fills up, replays stop coming! You can theoretically do this at any point, but remember that this is an **Erase Button** - only do it if you don't need any of the replays on that beamer anymore. This is why I suggest doing it before bracket starts :P
 
 ### Reporting
 
@@ -64,7 +64,7 @@ Station number is set with the button on the beamer - clicking goes up and, if y
 
 | Key                  | Default | What it does                                                                                                                                              |
 | -------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SSID`               | blank   | The network to join.                                                                                                                                      |
+| `SSID`               | blank   | The network to join.                                                                                                                                      |
 | `PASSWORD`           | blank   | 8–63 characters. Blank means an open network.                                                                                                             |
 | `COUNTRY`            | `US`    | Two-letter regulatory domain:`US`, `CA`, `JP`, `GB`...                                                                                                    |
 | `HIDDEN`             | `false` | Whether the network broadcasts its name.                                                                                                                  |

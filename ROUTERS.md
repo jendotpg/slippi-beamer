@@ -15,16 +15,16 @@ If you want a router that works even when the venue has no ethernet, you'll need
 
 ### Single router - TESTED AND WORKING
 
-| Setting   | Value                                                          | Per section |
-| --------- | -------------------------------------------------------------- | ----------- |
-| Mode      | Router - repeater (also called WISP or wireless WAN)           | identical   |
-| WAN       | Source wifi, 5 GHz band (Or ethernet, if the venue offers it!) | identical   |
-| SSID      | `beamer-N`(this is really just a preference)                   | **unique**  |
-| LAN       | `10.N.0.0/24`                                                  | **unique**  |
-| 2.4 GHz   | the venue's least-contended channel                            | identical   |
-| 5 GHz     | taken by the wan (turn off!)                                   | identical   |
-| DHCP      | on                                                             | identical   |
-| Isolation | off                                                            | identical   |
+| Setting   | Value                                                         | Per section |
+| --------- | ------------------------------------------------------------- | ----------- |
+| Mode      | Router - repeater (also called WISP or wireless WAN)          | identical   |
+| WAN       | Venue wifi, 5 GHz band (Or ethernet, if the venue offers it!) | identical   |
+| SSID      | `beamer-N`(this is really just a preference)                  | **unique**  |
+| LAN       | `10.N.0.0/24`                                                 | **unique**  |
+| 2.4 GHz   | the venue's least-contended channel                           | identical   |
+| 5 GHz     | taken by the wan (turn off!)                                  | identical   |
+| DHCP      | on                                                            | identical   |
+| Isolation | off                                                           | identical   |
 
 ### Sharded sections - UNTESTED
 
@@ -38,16 +38,16 @@ flowchart TD
         RTR1["Router"]
         BEAM1["15–30 beamers"]
         LAP1["2–4 TO laptops"]
-        RTR1 -->|2.4 GHz| BEAM1
-        RTR1 -->|2.4 GHz| LAP1
+        RTR1 --> BEAM1
+        RTR1 --> LAP1
     end
 
     subgraph S2["section 2"]
         RTR2["Router"]
         BEAM2["15–30 beamers"]
         LAP2["2–4 TO laptops"]
-        RTR2 -->|2.4 GHz| BEAM2
-        RTR2 -->|2.4 GHz| LAP2
+        RTR2 --> BEAM2
+        RTR2 -->  LAP2
     end
 
     subgraph S3["section 3"]
@@ -63,61 +63,79 @@ flowchart TD
     SRC -->|WAN| RTR3
 ```
 
-| Setting   | Value                                                          | Per section |
-| --------- | -------------------------------------------------------------- | ----------- |
-| Mode      | Router - repeater (also called WISP or wireless WAN)           | identical   |
-| WAN       | Source wifi, 5 GHz band (Or ethernet, if the venue offers it!) | identical   |
-| SSID      | `beamer-N`(this is really just a preference)                   | **unique**  |
-| LAN       | `10.N.0.0/24`                                                  | **unique**  |
-| 2.4 GHz   | the venue's least-contended channel                            | identical   |
-| 5 GHz     | taken by the wan (turn off!)                                   | identical   |
-| DHCP      | on                                                             | identical   |
-| Isolation | off                                                            | identical   |
+| Setting   | Value                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------- |
+| Mode      | **No Ethernet**: Repeater (also called WISP or wireless WAN)<br /><br />**Ethernet**: Router |
+| WAN       | **No Ethernet**: Venue wifi, 5 GHz band<br /><br />**Ethernet**: Ethernet                    |
+| SSID      | `beamer-N` **(unique per section)**                                                          |
+| LAN       | `10.N.0.0/24` **(unique per section)**                                                       |
+| 2.4 GHz   | the venue's least-contended channel                                                          |
+| 5 GHz     | **No Ethernet**: Off<br /><br />**Ethernet**: On                                             |
+| DHCP      | on                                                                                           |
+| Isolation | off                                                                                          |
 
 ### Connected sections - UNTESTED
 
-**TOs can see Beamers in every section**. Some venue WiFis will struggle with this setup, as its a lot of DHCP leases. If you can change the router settings, just growing the DHCP pool will fix this issue - if it belongs to the venue and you can't, however, you'll either have to use a sharded setup (and assign stations to players) or bring your own router to put between the venue router and the section routers.
+**TOs can see Beamers in every section**. You'll need to bring one extra router in addition to each of the section routers, which you'll be using as APs.
 
 ```mermaid
 flowchart TD
     SRC["Venue WiFi / Ethernet"]
 
+	RTR0["Central Router"]
+
     subgraph S1["section 1"]
-        RTR1["Router"]
+        RTR1["AP"]
         BEAM1["15–30 beamers"]
         LAP1["2–4 TO laptops"]
-        RTR1 -->|2.4 GHz| BEAM1
-        RTR1 -->|2.4 GHz| LAP1
+        RTR1 --> BEAM1
+        RTR1 --> LAP1
     end
 
     subgraph S2["section 2"]
-        RTR2["Router"]
+        RTR2["AP"]
         BEAM2["15–30 beamers"]
         LAP2["2–4 TO laptops"]
-        RTR2 -->|2.4 GHz| BEAM2
-        RTR2 -->|2.4 GHz| LAP2
+        RTR2 --> BEAM2
+        RTR2 --> LAP2
     end
 
     subgraph S3["section 3"]
-        RTR3["Router"]
+        RTR3["AP"]
         BEAM3["15–30 beamers"]
         LAP3["2–4 TO laptops"]
-        RTR3 -->|2.4 GHz| BEAM3
-        RTR3 -->|2.4 GHz| LAP3
+        RTR3 --> BEAM3
+        RTR3 --> LAP3
     end
 
-    SRC -->|WAN| RTR1
-    SRC -->|WAN| RTR2
-    SRC -->|WAN| RTR3
+	SRC --> RTR0
+    RTR0 --> RTR1
+    RTR0 --> RTR2
+    RTR0 --> RTR3
 ```
 
-| Setting   | Value                                                                        | Per section |
-| --------- | ---------------------------------------------------------------------------- | ----------- |
-| Mode      | Mesh extender (Sometimes called wireless repeater, media bridge, or just AP) | identical   |
-| WAN       | Source wifi, 5 GHz band (Or ethernet, if the venue offers it!)               | identical   |
-| SSID      | `beamer-N`(this is really just a preference)                                 | **unique**  |
-| LAN       | `10.N.0.0/24`                                                                | **unique**  |
-| 2.4 GHz   | the venue's least-contended channel                                          | identical   |
-| 5 GHz     | taken by the wan (turn off!)                                                 | identical   |
-| DHCP      | on                                                                           | identical   |
-| Isolation | off                                                                          | identical   |
+#### Central router settings
+
+| Setting   | Value                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------- |
+| Mode      | **No Ethernet**: Repeater (also called WISP or wireless WAN)<br /><br />**Ethernet**: Router |
+| WAN       | **No Ethernet**: Venue wifi, 5 GHz band<br /><br />**Ethernet**: Ethernet                    |
+| SSID      | `beamer-central`                                                                             |
+| LAN       | `10.0.0.0/24`                                                                                |
+| 2.4 GHz   | the venue's least-contended channel                                                          |
+| 5 GHz     | on                                                                                           |
+| DHCP      | on                                                                                           |
+| Isolation | off                                                                                          |
+
+#### AP settings
+
+| Setting   | Value                                                                        |
+| --------- | ---------------------------------------------------------------------------- |
+| Mode      | Mesh extender (Sometimes called wireless repeater, media bridge, or just AP) |
+| WAN       | `beamer-central`, 5 GHz band                                                 |
+| SSID      | `beamer-N` **(unique per section)**                                          |
+| LAN       | `10.N.0.0/24` **(unique per section)**                                       |
+| 2.4 GHz   | the venue's least-contended channel                                          |
+| 5 GHz     | Off                                                                          |
+| DHCP      | off                                                                          |
+| Isolation | off                                                                          |
