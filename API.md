@@ -139,7 +139,7 @@ Whenever a game starts or finsihes a beamer will send a single UDP datagram to `
 ```json
 {
   "schema": 1,
-  "event": "game_finished",
+  "event": "game_started",
   "station_id": "3f2a...",
   "station_name": "Station 2",
   "seq": 8,

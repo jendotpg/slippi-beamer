@@ -1,5 +1,6 @@
 use std::ffi::CString;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 use esp_idf_svc::sys::{
     beamer_fat_ro_register, esp, esp_vfs_fat_register, esp_vfs_fat_unregister_path, f_mount,
@@ -85,7 +86,39 @@ impl WriteWindow {
     }
 }
 
-static RO_LOCK: Mutex<()> = Mutex::new(());
+struct Gate {
+    held: bool,
+    scan_waiting: bool,
+}
+
+static GATE: Mutex<Gate> = Mutex::new(Gate {
+    held: false,
+    scan_waiting: false,
+});
+static FREED: Condvar = Condvar::new();
+
+const SCAN_POLL: Duration = Duration::from_secs(1);
+
+fn gate() -> MutexGuard<'static, Gate> {
+    GATE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+struct Held;
+
+impl Held {
+    fn claim(mut g: MutexGuard<'static, Gate>) -> Held {
+        g.held = true;
+        Held
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        gate().held = false;
+        FREED.notify_all();
+    }
+}
+
 static RO_VOLUME: std::sync::OnceLock<RoVolume> = std::sync::OnceLock::new();
 
 struct RoVolume {
@@ -135,8 +168,7 @@ pub fn register_read_window(sd: &SdCard) -> Result<(), EspError> {
 }
 
 pub struct ReadWindow {
-    #[allow(dead_code)]
-    guard: MutexGuard<'static, ()>,
+    _held: Held,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -146,16 +178,47 @@ pub struct OpenTiming {
 }
 
 impl ReadWindow {
-    pub fn try_open_measured(sd: &SdCard) -> Result<Option<(ReadWindow, OpenTiming)>, EspError> {
+    /// blocks until there's an open window
+    pub fn open_next(
+        sd: &SdCard,
+        still_wanted: impl Fn() -> bool,
+    ) -> Result<Option<ReadWindow>, EspError> {
+        let _ = sd;
+        let mut g = gate();
+        g.scan_waiting = true;
+        while g.held {
+            g = match FREED.wait_timeout(g, SCAN_POLL) {
+                Ok((g, _)) => g,
+                Err(e) => e.into_inner().0,
+            };
+            if !still_wanted() {
+                g.scan_waiting = false;
+                drop(g);
+                FREED.notify_all();
+                return Ok(None);
+            }
+        }
+        g.scan_waiting = false;
+        ReadWindow::mount(Held::claim(g)).map(Some)
+    }
+
+    /// blocks as long as max_wait, then gives up
+    pub fn open_measured(
+        sd: &SdCard,
+        max_wait: Duration,
+    ) -> Result<Option<(ReadWindow, OpenTiming)>, EspError> {
         let _ = sd;
         let t0 = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
-        let guard = match RO_LOCK.try_lock() {
-            Ok(g) => g,
-            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
-            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+        let g = match FREED.wait_timeout_while(gate(), max_wait, |g| g.held || g.scan_waiting) {
+            Ok((g, _)) => g,
+            Err(e) => e.into_inner().0,
         };
+        if g.held || g.scan_waiting {
+            return Ok(None);
+        }
+        let held = Held::claim(g);
         let t1 = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
-        let window = ReadWindow::mount_locked(guard)?;
+        let window = ReadWindow::mount(held)?;
         let t2 = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
         Ok(Some((
             window,
@@ -166,22 +229,21 @@ impl ReadWindow {
         )))
     }
 
+    /// doesn't block at all
     pub fn try_open(sd: &SdCard) -> Result<Option<ReadWindow>, EspError> {
         let _ = sd;
-        let guard = match RO_LOCK.try_lock() {
-            Ok(g) => g,
-            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
-            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
-        };
-
-        ReadWindow::mount_locked(guard).map(Some)
+        let g = gate();
+        if g.held || g.scan_waiting {
+            return Ok(None);
+        }
+        ReadWindow::mount(Held::claim(g)).map(Some)
     }
 
     pub fn path(&self, rel: &str) -> String {
         format!("{RO_BASE_PATH}/{rel}")
     }
 
-    fn mount_locked(guard: MutexGuard<'static, ()>) -> Result<ReadWindow, EspError> {
+    fn mount(held: Held) -> Result<ReadWindow, EspError> {
         let Some(vol) = RO_VOLUME.get() else {
             log::error!("read window used before it was registered");
             return Err(EspError::from_infallible::<
@@ -197,7 +259,7 @@ impl ReadWindow {
             >());
         }
 
-        Ok(ReadWindow { guard })
+        Ok(ReadWindow { _held: held })
     }
 
     pub fn for_each_replay(

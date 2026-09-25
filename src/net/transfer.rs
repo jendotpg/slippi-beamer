@@ -1,6 +1,7 @@
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
@@ -22,6 +23,7 @@ use super::http;
 const STACK: usize = 6144;
 const MAX_NAME: usize = 96;
 const MAX_HDR: usize = 128;
+const WINDOW_WAIT: Duration = Duration::from_secs(2);
 
 pub struct Job {
     req: *mut httpd_req_t,
@@ -182,10 +184,14 @@ fn run(card: &SdCard, job: &Job) -> anyhow::Result<()> {
     let resp = RawResponse(job.req);
     let t_start = http::now_us();
 
-    let opened = match crate::storage::fat::ReadWindow::try_open_measured(card) {
+    let opened = match crate::storage::fat::ReadWindow::open_measured(card, WINDOW_WAIT) {
         Ok(Some(w)) => w,
         Ok(None) => {
-            log::warn!("{}: the RO lock is held; refusing", job.name);
+            log::warn!(
+                "{}: the read window stayed busy for {}s; refusing",
+                job.name,
+                WINDOW_WAIT.as_secs()
+            );
             send_503(&resp, http::ERR_VOLUME);
             return Ok(());
         }

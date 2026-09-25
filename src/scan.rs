@@ -6,7 +6,7 @@
 //!
 //! In short:
 //!     peek runs every [`TICK`]
-//!     list runs as soon as a game is admitted,
+//!     list runs as soon as a peek sees the game finish, on the same window
 //!     list runs on the next tick after a host write, if no game is live
 //!     list runs every [`LIST_BACKSTOP_TICKS`] as a backstop -- writes reset it
 
@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
+use esp_idf_svc::sys::EspError;
 
 use crate::publish::PublishedSet;
 use crate::report;
@@ -54,7 +55,9 @@ pub fn set_replay_cap(cap: u32) {
     if REPLAY_CAP.swap(cap, Ordering::Relaxed) == cap {
         return;
     }
-    refresh();
+    if let Some(t) = lock(&TRACKER).as_mut() {
+        t.pending_list = true;
+    }
 }
 
 pub fn set_keep(keep: usize) {
@@ -112,12 +115,6 @@ pub fn forget_all() {
     status::set_files(0, cap);
 }
 
-pub fn refresh() {
-    if let Some(t) = lock(&TRACKER).as_mut() {
-        t.list();
-    }
-}
-
 static TRACKER: Mutex<Option<Tracker>> = Mutex::new(Some(Tracker::new()));
 
 pub fn spawn(sd: Arc<SdCard>, station: String, cap: usize, replay_cap: u32) -> anyhow::Result<()> {
@@ -153,23 +150,46 @@ fn run() {
             return;
         }
 
+        let due = lock(&TRACKER).as_mut().and_then(Tracker::due);
+        let Some((sd, listing)) = due else { continue };
+
+        let window = match ReadWindow::open_next(&sd, || !PARKED.load(Ordering::Relaxed)) {
+            // block until the window is open
+            Ok(Some(w)) => w,
+            Ok(None) => continue,
+            Err(e) => {
+                if let Some(t) = lock(&TRACKER).as_mut() {
+                    t.mount_failed(listing, &e);
+                }
+                continue;
+            }
+        };
+
         let mut guard = lock(&TRACKER);
         let Some(t) = guard.as_mut() else { continue };
-
-        if msc::take_dirty() {
-            t.pending_peek = true;
-            t.pending_list = true;
-            t.ticks_since_list = 0;
-        }
-        t.ticks_since_list = t.ticks_since_list.saturating_add(1);
-
+        let mut out = Outbox::default();
         if t.live.is_some() {
-            t.ticks_since_peek = t.ticks_since_peek.saturating_add(1);
-            if t.pending_peek || t.ticks_since_peek >= PEEK_BACKSTOP_TICKS {
-                t.peek_tracked();
-            }
-        } else if t.pending_list || t.ticks_since_list >= LIST_BACKSTOP_TICKS {
-            t.list();
+            t.peek_tracked(&window, &mut out);
+        } else {
+            t.list(&window, &mut out);
+        }
+        drop(window);
+        t.deliver(out);
+    }
+}
+
+type Found = (String, u64, slp::Game);
+
+#[derive(Default)]
+struct Outbox {
+    finished: heapless::Vec<Found, { MAX_NEW + 1 }>, // a peek's game, then the walk's
+    started: Option<Found>,
+}
+
+impl Outbox {
+    fn finish(&mut self, found: Found) {
+        if let Err((name, ..)) = self.finished.push(found) {
+            log::warn!("scan: {name} finished with too many others in one turn -- not served");
         }
     }
 }
@@ -211,37 +231,63 @@ impl Tracker {
         }
     }
 
-    fn peek_tracked(&mut self) {
+    fn due(&mut self) -> Option<(Arc<SdCard>, bool)> {
+        if msc::take_dirty() {
+            self.pending_peek = true;
+            self.pending_list = true;
+            self.ticks_since_list = 0;
+        }
+        self.ticks_since_list = self.ticks_since_list.saturating_add(1);
+
+        let listing = if self.live.is_some() {
+            self.ticks_since_peek = self.ticks_since_peek.saturating_add(1);
+            if !self.pending_peek && self.ticks_since_peek < PEEK_BACKSTOP_TICKS {
+                return None;
+            }
+            false
+        } else {
+            if !self.pending_list && self.ticks_since_list < LIST_BACKSTOP_TICKS {
+                return None;
+            }
+            true
+        };
+        Some((self.sd.clone()?, listing))
+    }
+
+    fn mount_failed(&mut self, listing: bool, e: &EspError) {
+        if !listing {
+            let name = self.live.as_deref().unwrap_or("the live game");
+            log::warn!(
+                "scan: could not mount to peek {name}: {e} ({})",
+                crate::journal::heap_note()
+            ); // not an error - sometimes this fails because an .slp is in flight over wifi
+            return;
+        }
+        log::warn!(
+            "scan: could not mount to list: {e} ({})",
+            crate::journal::heap_note()
+        );
+        warnings::set(WarningLabel::DriveFailing, true);
+        self.note_mount_failure(&format!("{e}"));
+    }
+
+    fn peek_tracked(&mut self, window: &ReadWindow, out: &mut Outbox) {
         let Some(name) = self.live.clone() else {
             return;
-        };
-        let Some(sd) = self.sd.clone() else { return };
-
-        let window = match ReadWindow::try_open(&sd) {
-            Ok(Some(w)) => w,
-            Ok(None) => return,
-            Err(e) => {
-                log::warn!(
-                    "scan: could not mount to peek {name}: {e} ({})",
-                    crate::journal::heap_note()
-                ); // not an error - sometimes this fails because an .slp is in flight over wifi
-                return;
-            }
         };
 
         self.pending_peek = false;
         self.ticks_since_peek = 0;
 
-        match peek(&window, &name) {
+        match peek(window, &name) {
             Some(game) => {
                 let live = game.live;
                 self.publish_game(&game, false);
                 if !live {
-                    let size = size_of(&window, &name);
-                    drop(window);
-                    self.admit(&game, &name, size);
+                    let size = size_of(window, &name);
+                    out.finish((name, size, game));
                     self.stop_tracking();
-                    self.list();
+                    self.list(window, out);
                 }
             }
             None => {
@@ -252,26 +298,7 @@ impl Tracker {
         }
     }
 
-    fn list(&mut self) {
-        let Some(sd) = self.sd.clone() else { return };
-
-        let window = match ReadWindow::try_open(&sd) {
-            Ok(Some(w)) => w,
-            Ok(None) => {
-                log::info!("scan: skipping the listing, the volume is busy");
-                return;
-            } //not an error - sometimes the listing is being served or similar
-            Err(e) => {
-                log::warn!(
-                    "scan: could not mount to list: {e} ({})",
-                    crate::journal::heap_note()
-                );
-                warnings::set(WarningLabel::DriveFailing, true);
-                self.note_mount_failure(&format!("{e}"));
-                return;
-            }
-        };
-
+    fn list(&mut self, window: &ReadWindow, out: &mut Outbox) {
         let known = &self.seen;
         let present = &mut self.present;
         present.fill(0);
@@ -362,11 +389,11 @@ impl Tracker {
             return;
         }
 
-        let mut finished: Vec<(String, u64, slp::Game)> = Vec::new();
-        let mut started: Option<(String, u64, slp::Game)> = None;
+        let mut finished: Vec<Found> = Vec::new();
+        let mut started: Option<Found> = None;
         let mut bad = false;
         for name in &fresh {
-            let Some(game) = peek(&window, name) else {
+            let Some(game) = peek(window, name) else {
                 bad = true;
                 if let Ok(i) = self.seen.binary_search(&hash(name)) {
                     self.seen.remove(i);
@@ -379,22 +406,28 @@ impl Tracker {
                 self.live = Some(name.clone());
                 self.pending_peek = false;
                 self.ticks_since_peek = 0;
-                started = Some((name.clone(), size_of(&window, name), game));
+                started = Some((name.clone(), size_of(window, name), game));
                 finished.clear();
                 break;
             }
             self.publish_game(&game, false);
-            finished.push((name.clone(), size_of(&window, name), game));
+            finished.push((name.clone(), size_of(window, name), game));
         }
 
         warnings::set(WarningLabel::SlpMisformat, bad);
 
-        drop(window);
-        if let Some((name, size, game)) = started {
-            crate::net::announce::game_started(&game, &name, size);
+        for found in finished {
+            out.finish(found);
         }
-        for (name, size, game) in finished {
+        out.started = started;
+    }
+
+    fn deliver(&mut self, out: Outbox) {
+        for (name, size, game) in out.finished {
             self.admit(&game, &name, size);
+        }
+        if let Some((name, size, game)) = out.started {
+            crate::net::announce::game_started(&game, &name, size);
         }
     }
 
