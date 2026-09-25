@@ -83,7 +83,7 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | Consumer                     |       Bytes | Description                                                                                                                                                                                              |
 | ---------------------------- | ----------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ESP-IDF and its libraries    |      43,540 | WiFi/PHY/supplicant 12,314, FreeRTOS 4,732 (mostly`port_IntStack`), the `esp-idf-*` crates 1,843, Rust `std`/`core` 1,643, lwIP 335, a 16,474 tail, and 6,199 of padding                                 |
-| `beamer_wbc.c` `s_data`      |      32,768 | the write-back cache itself:`WBC_SECTORS=64`sectors of 512 B each                                                                                                                                        |
+| `beamer_wbc.c` `s_data`      |      16,384 | the write-back cache itself:`WBC_SECTORS=32`sectors of 512 B each                                                                                                                                        |
 | `beamer_gz.c` `s_arena`      |      15,360 | zlib allocations over a 1 KB window                                                                                                                                                                      |
 | `beamer_wbc.c` `s_staging`   |       8,192 | write back cache flush space                                                                                                                                                                             |
 | `beamer_msc.c` `s_ring`      |       8,192 | 512 transfer timings - used to track read / write time on SD cards                                                                                                                                       |
@@ -100,10 +100,10 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | TinyUSB`_mscd_epbuf`         |       2,048 | `CFG_TUD_MSC_EP_BUFSIZE`(TinyUSB endpoint data buffer)                                                                                                                                                   |
 | `beamer_msc.c` `s_stack`     |       6,144 | `beamer_msc` task stack                                                                                                                                                                                  |
 | `beamer_wbc.c` `s_stack`     |       4,096 | `beamer_wbc` flush task stack                                                                                                                                                                            |
-| `beamer_wbc.c` `s_meta`      |         768 | 64 slot descriptors                                                                                                                                                                                      |
+| `beamer_wbc.c` `s_meta`      |         384 | 32 slot descriptors                                                                                                                                                                                      |
 | `volume.rs` `WIPE_BATCH`     |       2,048 | 8 replay names for`POST /reset-beamer`, so the wipe does not build a list of every replay on the heap                                                                                                    |
 | everything else              |       4,239 |                                                                                                                                                                                                          |
-| **Total**                    | **167 KiB** |                                                                                                                                                                                                          |
+| **Total**                    | **151 KiB** |                                                                                                                                                                                                          |
 
 #### Allocated once at boot
 
@@ -138,12 +138,12 @@ Everything else is strictly read-only and re-reads the FAT rather than caching a
 | Total SRAM                            |    512 KiB |
 | ...instruction cache and ROM reserved |     80 KiB |
 | ...IRAM, the firmware's own code      |     94 KiB |
-| ...allocated statically at link time  |    167 KiB |
-| ...left for the heap                  |    171 KiB |
+| ...allocated statically at link time  |    151 KiB |
+| ...left for the heap                  |    187 KiB |
 | Allocated once at boot,`DEBUG=false`  |   ~117 KiB |
 | ...`DEBUG=true`                       |   ~125 KiB |
 | Allocated by lwIP while serving       |   9-18 KiB |
-| Free heap at rest                     |    ~44 KiB |
+| Free heap at rest                     |    ~59 KiB |
 | Free heap while serving               | ~25-45 KiB |
 | Largest free block at rest            |    ~31 KiB |
 | Largest free block while serving      |   ~7.5 KiB |
@@ -160,7 +160,7 @@ A station's behaviour must be a function of its config file and nothing else.
 
 #### The RAM write-back cache
 
-32 KB of internal SRAM sits between the host and the card. Writes land in RAM and return immediately while a draining task moves those cached sectors onto the card. This shields hosts from the SD card stalls (which can honestly be quite frequent). While a sector is dirty, ejects can seriously mess up the state of the microSD card. This is why there are `BUSY` states to tell TOs not to unplug.
+16 KB of internal SRAM sits between the host and the card. Writes land in RAM and return immediately while a draining task moves those cached sectors onto the card. This shields hosts from the SD card stalls (which can honestly be quite frequent). While a sector is dirty, ejects can seriously mess up the state of the microSD card. This is why there are `BUSY` states to tell TOs not to unplug.
 
 Errors quiesce the cache before the LED turns red by switching to write-through - that way an error'd beamer can be safely pulled without ejecting.
 

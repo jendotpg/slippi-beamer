@@ -1,5 +1,5 @@
 /*
- * The write-back cache: 32 KB of internal SRAM between the host and the card
+ * The write-back cache: 16 KB of internal SRAM between the host and the card
  * prevents SD card stalls (common!) from being visible to the host.
  *
  * Three things to note:
@@ -22,7 +22,7 @@
 
 static const char *TAG = "beamer_wbc";
 
-#define WBC_SECTORS 64
+#define WBC_SECTORS 32
 #define WBC_SECTOR_SZ 512
 #define WBC_FLUSH_RUN 16
 
