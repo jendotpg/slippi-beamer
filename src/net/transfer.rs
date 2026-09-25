@@ -168,10 +168,12 @@ impl RawResponse {
     }
 }
 
-fn retry_after(resp: &RawResponse) {
-    if let Ok(secs) = std::ffi::CString::new(super::retry_after_secs().to_string()) {
-        resp.hdr(c"Retry-After", &secs);
+fn send_503(resp: &RawResponse, body: &[u8]) -> esp_err_t {
+    let secs = std::ffi::CString::new(super::retry_after_secs().to_string());
+    if let Ok(secs) = &secs {
+        resp.hdr(c"Retry-After", secs);
     }
+    resp.send(S_503, H_JSON, body)
 }
 
 fn run(card: &SdCard, job: &Job) -> anyhow::Result<()> {
@@ -184,14 +186,12 @@ fn run(card: &SdCard, job: &Job) -> anyhow::Result<()> {
         Ok(Some(w)) => w,
         Ok(None) => {
             log::warn!("{}: the RO lock is held; refusing", job.name);
-            retry_after(&resp);
-            resp.send(S_503, H_JSON, http::ERR_VOLUME);
+            send_503(&resp, http::ERR_VOLUME);
             return Ok(());
         }
         Err(e) => {
             log::error!("{}: could not mount read-only: {e}", job.name);
-            retry_after(&resp);
-            resp.send(S_503, H_JSON, http::ERR_VOLUME);
+            send_503(&resp, http::ERR_VOLUME);
             return Ok(());
         }
     };
@@ -390,14 +390,12 @@ unsafe extern "C" fn handle(r: *mut httpd_req_t) -> esp_err_t {
                 super::BLOCK_FLOOR
             ),
         }
-        retry_after(&resp);
-        return resp.send(S_503, H_JSON, http::ERR_LOW_MEMORY);
+        return send_503(&resp, http::ERR_LOW_MEMORY);
     }
 
     if super::transfers_in_flight() > 0 || busy() {
         log::info!("refusing {name}: already serving a replay");
-        retry_after(&resp);
-        return resp.send(S_503, H_JSON, http::ERR_SERVING);
+        return send_503(&resp, http::ERR_SERVING);
     }
 
     let range = http::parse_range(header(r, c"Range").as_deref());
@@ -440,8 +438,7 @@ unsafe extern "C" fn handle(r: *mut httpd_req_t) -> esp_err_t {
     let mut async_req: *mut httpd_req_t = std::ptr::null_mut();
     if httpd_req_async_handler_begin(r, &mut async_req) != ESP_OK || async_req.is_null() {
         log::error!("refusing {name}: could not take the request async");
-        retry_after(&resp);
-        return resp.send(S_503, H_JSON, http::ERR_LOW_MEMORY);
+        return send_503(&resp, http::ERR_LOW_MEMORY);
     }
 
     let job = Job {
@@ -459,8 +456,7 @@ unsafe extern "C" fn handle(r: *mut httpd_req_t) -> esp_err_t {
         let async_req = job.req;
         drop(job);
         let late = RawResponse(async_req);
-        retry_after(&late);
-        late.send(S_503, H_JSON, http::ERR_SERVING);
+        send_503(&late, http::ERR_SERVING);
         let fd = httpd_req_to_sockfd(async_req);
         httpd_req_async_handler_complete(async_req);
         close_async_session(fd);
