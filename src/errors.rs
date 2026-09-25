@@ -3,12 +3,14 @@
 //! bind get [`Target::Late`] and are put in NVS.
 //!
 //! During the boot process, init() below rotates the previous sessions Late
-//! errors off of NVS and onto the disk at LOGS/error.txt.
+//! errors off of NVS and onto the disk at LOGS/error.txt. mirror() rewrites
+//! that file whenever when a boot has errors.
 use core::fmt::Write as _;
 use std::sync::{Mutex, MutexGuard};
 
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 
+use crate::journal;
 use crate::status::{self, ErrorLabel, State};
 
 const NAMESPACE: &str = "beamer";
@@ -243,18 +245,19 @@ fn have_errors(s: &Store) -> bool {
 
 pub fn mirror(base: &str, station_id: &str) {
     let s = store();
-    let path = format!("{base}/LOGS/error.txt");
 
     if !have_errors(&s) {
-        if std::path::Path::new(&path).exists() {
-            if let Err(e) = std::fs::remove_file(&path) {
-                log::warn!("could not remove error.txt: {e}");
-            }
-        }
         return;
     }
 
-    let mut body = format!("Beamer errors\nstation {station_id}\n\n");
+    let path = format!("{base}/LOGS/error.txt");
+
+    let boot = unsafe { esp_idf_svc::sys::beamer_boot_count() };
+    let reset = journal::reset_name(unsafe { esp_idf_svc::sys::esp_reset_reason() });
+    let mut body = format!(
+        "Beamer errors\nfirmware {}\nstation {station_id}\nthis boot is boot {boot}, after {reset}\n\n",
+        crate::report::VERSION
+    );
     for line in s.prev.lines() {
         body.push_str("[previous boot] ");
         body.push_str(line);
@@ -278,9 +281,10 @@ Fix CONFIG/config.txt on this drive and save it. The station picks the file up
 and restarts itself if the fix is one it cannot apply while running.
 There is no need to eject - ejecting shuts the station down for good.
 
-This file can be up to one boot behind. The LED and the screen never are: if the
-LED is GREEN and the screen shows this station's name, the station is working
-right now!
+This file is only rewritten by a boot that had errors - check the boot line
+above to see which boot that was. The LED and the screen are always up to
+date: if the LED is GREEN and the screen shows this station's name, the
+station is working right now!
 ";
 
 impl Store {

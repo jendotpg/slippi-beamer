@@ -24,6 +24,7 @@ Everything here is cached by the scan tick so this `GET` is very cheap - **it's 
   "schema": 1,
   "arch": "esp32",
   "firmware_version": "v0.2.2",
+  "uptime": 8145, # seconds since boot
   "station_id": "3f2a...", # beamer uuid against factory mac address
   "station_name": "Station 2",
   "ssid": "nycmelee",

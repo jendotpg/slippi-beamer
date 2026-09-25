@@ -44,8 +44,10 @@ ERR_NOT_FOUND = "no such replay on this station"
 ERR_STAT = "that replay could not be read"
 ERR_RANGE = "range not satisfiable"
 ERR_SERVING = "a replay is being served right now; retry once it finishes"
-ERR_CONFIRM = ("POST /reset-beamer needs the header 'X-Beamer-Confirm: reset'. "
-               "It erases every replay on this station.")
+ERR_CONFIRM = (
+    "POST /reset-beamer needs the header 'X-Beamer-Confirm: reset'. "
+    "It erases every replay on this station."
+)
 ERR_GAME_LIVE = "a game is being recorded right now; retry once it finishes"
 RETRY_AFTER_SERVING = "2"
 RETRY_AFTER_GAME_LIVE = "15"
@@ -425,9 +427,10 @@ def character_sig(game):
 class Station:
     def __init__(self, args):
         self.args = args
+        self.started = time.monotonic()
         self.station_id = args.station or str(uuid.uuid4())
         self.station_name = args.station_name or self.station_id
-        self.lock = threading.Lock() # safe "set_game" call
+        self.lock = threading.Lock()  # safe "set_game" call
         self.transfer_lock = threading.Lock()
         self.replay_requests = 0
         self.port_sig = None
@@ -514,13 +517,14 @@ class Station:
             "schema": self.args.schema,
             "arch": "fake",
             "firmware_version": "fake",
+            "uptime": int(time.monotonic() - self.started),
             "station_id": self.station_id,
             "station_name": self.station_name,
             "ssid": self.args.wifi,
             "rssi": self.args.rssi,
             "phy_mode": self.args.phy_mode,
             "channel": self.args.channel,
-            "replay_count": len(self.replays()),
+            "replay_count": len(self.replays()) + (1 if self.deferred_name else 0),
             "replay_cap": self.args.cap,
             "serving": 1 if self.transfer_lock.locked() else 0,
             "ssh": False,
@@ -586,6 +590,7 @@ class Station:
 
 
 SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+\.slp$")
+
 
 class Handler(BaseHTTPRequestHandler):
     station: Station = None
@@ -706,7 +711,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(404, ERR_NOT_FOUND)
             return
 
-        if not self.station.transfer_lock.acquire(blocking=False): # one at a time, just like firmware
+        if not self.station.transfer_lock.acquire(
+            blocking=False
+        ):  # one at a time, just like firmware
             self.send_error_json(503, ERR_SERVING, {"Retry-After": RETRY_AFTER_SERVING})
             return
         try:
@@ -726,10 +733,14 @@ class Handler(BaseHTTPRequestHandler):
         start = self.parse_range(total)
         resume = None if start is not None else self.parse_from(total)
         if start == "bad" or resume == "bad":
-            self.send_error_json(416, ERR_RANGE, {
-                "Content-Range": f"bytes */{total}",
-                "Accept-Ranges": "bytes",
-            })
+            self.send_error_json(
+                416,
+                ERR_RANGE,
+                {
+                    "Content-Range": f"bytes */{total}",
+                    "Accept-Ranges": "bytes",
+                },
+            )
             return
 
         ranged = start is not None
@@ -741,7 +752,9 @@ class Handler(BaseHTTPRequestHandler):
         level = self.gzip_level()
         gzip = not ranged and self.gzip_wanted()
         if gzip:
-            c = zlib.compressobj(level, zlib.DEFLATED, 16 + GZ_WINDOW_BITS, GZ_MEM_LEVEL)
+            c = zlib.compressobj(
+                level, zlib.DEFLATED, 16 + GZ_WINDOW_BITS, GZ_MEM_LEVEL
+            )
             body = c.compress(body) + c.flush()
 
         self.station.replay_requests += 1
@@ -751,7 +764,9 @@ class Handler(BaseHTTPRequestHandler):
 
         self.send_response(206 if ranged else 200)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Transfer-Encoding", "chunked") # always chunked - real firmware is memory starved
+        self.send_header(
+            "Transfer-Encoding", "chunked"
+        )  # always chunked - real firmware is memory starved
         if gzip:
             self.send_header("Content-Encoding", "gzip")
             self.send_header("Vary", "Accept-Encoding, X-Replay-From")
@@ -802,12 +817,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error_json(400, ERR_CONFIRM)
                 return
             if self.station.live():
-                self.send_error_json(409, ERR_GAME_LIVE,
-                                     {"Retry-After": RETRY_AFTER_GAME_LIVE})
+                self.send_error_json(
+                    409, ERR_GAME_LIVE, {"Retry-After": RETRY_AFTER_GAME_LIVE}
+                )
                 return
             if self.station.transfer_lock.locked():
-                self.send_error_json(409, ERR_SERVING,
-                                     {"Retry-After": RETRY_AFTER_SERVING})
+                self.send_error_json(
+                    409, ERR_SERVING, {"Retry-After": RETRY_AFTER_SERVING}
+                )
                 return
             self.send_json(200, {"ok": True, "message": "reset OK"})
             return
@@ -831,8 +848,11 @@ class Announcer:
         self.seq += 1
         payload = self.station.announce_payload(event, self.seq, replay_name)
         self.sock.sendto(json.dumps(payload).encode(), (ANNOUNCE_GROUP, ANNOUNCE_PORT))
-        print(f"fake_beamer[{self.station.args.port}] announce {event} "
-              f"seq={self.seq} -> {ANNOUNCE_GROUP}:{ANNOUNCE_PORT}", file=sys.stderr)
+        print(
+            f"fake_beamer[{self.station.args.port}] announce {event} "
+            f"seq={self.seq} -> {ANNOUNCE_GROUP}:{ANNOUNCE_PORT}",
+            file=sys.stderr,
+        )
 
 
 def advertise(name, port):
@@ -859,64 +879,146 @@ def advertise(name, port):
 
 
 @click.command(context_settings=beamer.HELP_OPTIONS)
-@click.option("--name", default="", show_default=True,
-              help="mDNS instance name to advertise as. Defaults to --station-name, "
-                   "or beamer-fake.")
-@click.option("--port", type=int, default=8080, show_default=True,
-              help="HTTP port to serve on. Run several on different ports for a fleet.")
+@click.option(
+    "--name",
+    default="",
+    show_default=True,
+    help="mDNS instance name to advertise as. Defaults to --station-name, "
+    "or beamer-fake.",
+)
+@click.option(
+    "--port",
+    type=int,
+    default=8080,
+    show_default=True,
+    help="HTTP port to serve on. Run several on different ports for a fleet.",
+)
 @click.option("--station", default="", help="Station uuid. Random per run if unset.")
-@click.option("--station-name", default="", show_default=True,
-              help="Station name the app displays; a real station sets this with "
-                   "its button. Falls back to the station id when unset.")
+@click.option(
+    "--station-name",
+    default="",
+    show_default=True,
+    help="Station name the app displays; a real station sets this with "
+    "its button. Falls back to the station id when unset.",
+)
 @click.option("--wifi", default="fake-net", show_default=True, help="ssid to report.")
 @click.option("--replays", default="", help="Directory of .slp files to serve.")
 @click.option("--game", default="", help=".slp to peek and report as the current game.")
-@click.option("--served", type=int, default=DEFAULT_SERVED, show_default=True,
-              help="How many replays to publish in the served index.")
-@click.option("--cap", type=int, default=DEFAULT_CAP, show_default=True,
-              help="replay_cap the station reports.")
-@click.option("--rssi", type=int, default=FAKE_RSSI, show_default=True,
-              help="rssi to report (dBm). Default is an obviously-fake sentinel.")
-@click.option("--phy-mode", default=FAKE_PHY_MODE, show_default=True,
-              help="phy_mode to report. Default is an obviously-fake sentinel.")
-@click.option("--channel", type=int, default=FAKE_CHANNEL, show_default=True,
-              help="channel to report. Default 0 is an obviously-fake sentinel.")
+@click.option(
+    "--served",
+    type=int,
+    default=DEFAULT_SERVED,
+    show_default=True,
+    help="How many replays to publish in the served index.",
+)
+@click.option(
+    "--cap",
+    type=int,
+    default=DEFAULT_CAP,
+    show_default=True,
+    help="replay_cap the station reports.",
+)
+@click.option(
+    "--rssi",
+    type=int,
+    default=FAKE_RSSI,
+    show_default=True,
+    help="rssi to report (dBm). Default is an obviously-fake sentinel.",
+)
+@click.option(
+    "--phy-mode",
+    default=FAKE_PHY_MODE,
+    show_default=True,
+    help="phy_mode to report. Default is an obviously-fake sentinel.",
+)
+@click.option(
+    "--channel",
+    type=int,
+    default=FAKE_CHANNEL,
+    show_default=True,
+    help="channel to report. Default 0 is an obviously-fake sentinel.",
+)
 @click.option("--unhealthy", is_flag=True, help='Report health "error".')
-@click.option("--warn", default="",
-              help='Comma-separated warning labels, e.g. "DRIVE FULL,NO WII"; '
-                   'any warning reports health "warn".')
+@click.option(
+    "--warn",
+    default="",
+    help='Comma-separated warning labels, e.g. "DRIVE FULL,NO WII"; '
+    'any warning reports health "warn".',
+)
 @click.option("--unreported", is_flag=True, help="Answer 503 on GET /status.")
-@click.option("--schema", type=int, default=SCHEMA, show_default=True,
-              help="schema to report on /status, /SLIPPI/ and announces, e.g. 2 "
-                   "to play a station on firmware newer than the app.")
-@click.option("--truncate-every", type=int, default=0, metavar="N",
-              help="Stop the chunked stream mid-body with no terminating chunk on "
-                   "every Nth replay - a dropped-link truncation.")
-@click.option("--stall-every", type=int, default=0, metavar="N",
-              help="Send one chunk then go quiet on every Nth replay, to trip the "
-                   "downloader's stall watchdog.")
-@click.option("--rate", type=float, default=0, metavar="KBPS",
-              help="Throttle replay bodies to roughly this many KB/s, standing in "
-                   "for a congested venue AP.")
-@click.option("--stall-seconds", type=float, default=30.0, show_default=True,
-              help="How long --stall-every holds the connection open.")
-@click.option("--announce/--no-announce", default=True, show_default=True,
-              help="Multicast game_started / game_finished on liveness changes.")
-@click.option("--ended-delay", type=float, default=0.0, show_default=True, metavar="SECONDS",
-              help="Announce game_finished this many seconds after startup, releasing the "
-                   "held-back replay in the same instant.")
+@click.option(
+    "--schema",
+    type=int,
+    default=SCHEMA,
+    show_default=True,
+    help="schema to report on /status, /SLIPPI/ and announces, e.g. 2 "
+    "to play a station on firmware newer than the app.",
+)
+@click.option(
+    "--truncate-every",
+    type=int,
+    default=0,
+    metavar="N",
+    help="Stop the chunked stream mid-body with no terminating chunk on "
+    "every Nth replay - a dropped-link truncation.",
+)
+@click.option(
+    "--stall-every",
+    type=int,
+    default=0,
+    metavar="N",
+    help="Send one chunk then go quiet on every Nth replay, to trip the "
+    "downloader's stall watchdog.",
+)
+@click.option(
+    "--rate",
+    type=float,
+    default=0,
+    metavar="KBPS",
+    help="Throttle replay bodies to roughly this many KB/s, standing in "
+    "for a congested venue AP.",
+)
+@click.option(
+    "--stall-seconds",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="How long --stall-every holds the connection open.",
+)
+@click.option(
+    "--announce/--no-announce",
+    default=True,
+    show_default=True,
+    help="Multicast game_started / game_finished on liveness changes.",
+)
+@click.option(
+    "--ended-delay",
+    type=float,
+    default=0.0,
+    show_default=True,
+    metavar="SECONDS",
+    help="Announce game_finished this many seconds after startup, releasing the "
+    "held-back replay in the same instant. Until then it counts in "
+    "replay_count but isn't served, like a game still being written.",
+)
 def main(**opts):
     args = SimpleNamespace(**opts)
 
     args.name = args.name or args.station_name or "beamer-fake"
 
     if args.replays and not os.path.isdir(args.replays):
-        raise click.BadParameter(f"{args.replays} is not a directory", param_hint="--replays")
+        raise click.BadParameter(
+            f"{args.replays} is not a directory", param_hint="--replays"
+        )
     if args.game and not os.path.isfile(args.game):
         raise click.BadParameter(f"{args.game} is not a file", param_hint="--game")
 
-    beamer.banner("fake_beamer", name=args.name, port=args.port,
-                  station=args.station_name or "(unnamed)")
+    beamer.banner(
+        "fake_beamer",
+        name=args.name,
+        port=args.port,
+        station=args.station_name or "(unnamed)",
+    )
 
     station = Station(args)
     announcer = Announcer(station, args.announce)
@@ -949,6 +1051,7 @@ def main(**opts):
     announcer.send("game_started")
 
     if args.ended_delay > 0 and station.deferred_name is not None:
+
         def end_game():
             time.sleep(args.ended_delay)
             name = station.release_deferred()

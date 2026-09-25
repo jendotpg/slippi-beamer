@@ -155,6 +155,7 @@ pub fn status_json(
     let _ = writeln!(s, "  \"schema\": {SCHEMA},");
     let _ = writeln!(s, "  \"arch\": \"{ARCH}\",");
     line_str(s, "firmware_version", Some(VERSION));
+    let _ = writeln!(s, "  \"uptime\": {now_s},");
 
     line_str(s, "station_id", Some(station_id));
     line_str(s, "station_name", Some(station_name));

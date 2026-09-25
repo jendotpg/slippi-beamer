@@ -830,8 +830,9 @@ const CONFIG_TEMPLATE: &str = "\
 # boot only - there's no way to turn it on without a manual reboot.
 #
 # Until SSID is filled in, this station has no network. That is expected.
-# After a reboot, if LOGS/error.txt exists it says what went wrong. The
-# station's live state is the LED, the screen, and http://<station>/status.
+# After a reboot, LOGS/error.txt says what went wrong on the last boot that
+# had errors - its boot line tells you which boot that was. The station's
+# live state is the LED, the screen, and http://<station>/status.
 #
 # SSID / PASSWORD    the network to join. Leave PASSWORD blank for an open
 #                    network; otherwise it is 8-63 characters.
